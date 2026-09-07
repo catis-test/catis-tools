@@ -42,6 +42,7 @@
   input[type=range]{width:100%; margin:10px 0 4px; accent-color:var(--accent);}
   .manual{display:flex; gap:8px; align-items:center; margin-top:12px; font-size:14px; color:var(--muted); flex-wrap:wrap;}
   .manual input{width:96px; padding:10px; font-size:16px; border:1px solid var(--line); border-radius:9px;}
+  .manual select{flex:1; min-width:160px; padding:10px; font-size:16px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink);}
   .save-wrap{margin:16px 0;}
   .gap{height:34px;}
   .barwrap{background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px 16px 90px;}
@@ -53,7 +54,11 @@
   /* ---------- Тест ---------- */
   #test{background:var(--field);}
   .field{flex:1; display:flex; align-items:center; justify-content:center; padding:6px; overflow:auto;
-    transition:background .15s;}
+    transition:background .15s; position:relative;}
+  .field.typo{touch-action:none; cursor:ns-resize;}
+  /* Типоскоп: две шторки над и под окном чтения, окно ведётся пальцем/мышью */
+  .shade{position:absolute; left:0; right:0; pointer-events:none; display:none;}
+  .field.typo .shade{display:block;}
   .sentence{line-height:1.05; text-align:center; width:min(13em,96%);
     -webkit-user-select:none; user-select:none; overflow-wrap:normal;}
 
@@ -61,6 +66,7 @@
   .side .meta{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
     font-size:12.5px; color:var(--muted); line-height:1.35;}
   .side .meta b{color:var(--ink);}
+  #xhLabel{font-size:20px;}
   .calib-btn{padding:7px 10px; font-size:12.5px; white-space:nowrap;}
   .ctrls{display:flex; flex-wrap:wrap; gap:8px; margin-top:8px;}
   .ctrls button{flex:1 1 auto; min-width:92px; padding:10px 6px; font-size:14px;}
@@ -84,6 +90,7 @@
 <section id="calib" class="screen active">
   <h1>Калибровка экрана</h1>
   <p class="sub">Один раз на этом устройстве. Дальше размеры верны без линейки.</p>
+  <p class="sub" id="calibNote"></p>
   <ol class="steps">
     <li>Кнопками и бегунком задайте значение (или введите известное число ниже).</li>
     <li>Приложите линейку к нижней полосе и добейтесь, чтобы она равнялась <b>50&nbsp;мм</b>.</li>
@@ -98,7 +105,11 @@
     </div>
     <input id="slider" type="range" min="3.5" max="7.0" step="0.01" value="5.49">
     <div class="manual">
-      <span>Известное значение:</span>
+      <label for="deviceSel">Устройство:</label>
+      <select id="deviceSel" onchange="applyDevice()"><option value="">— выбрать —</option></select>
+    </div>
+    <div class="manual">
+      <label for="manualVal">Известное значение:</label>
       <input id="manualVal" type="text" inputmode="decimal" placeholder="напр. 5,49">
       <button onclick="applyManual()">Применить</button>
     </div>
@@ -120,12 +131,16 @@
 
 <!-- ===================== ТЕСТ ===================== -->
 <section id="test" class="screen">
-  <div class="field"><div id="sentence" class="sentence">…</div></div>
+  <div class="field" id="field">
+    <div id="sentence" class="sentence">…</div>
+    <div id="shadeTop" class="shade" style="top:0"></div>
+    <div id="shadeBottom" class="shade" style="bottom:0"></div>
+  </div>
   <div class="side">
     <div class="meta">
       <div>
-        <b id="mLabel">2,0 M</b> · <span id="logmarLabel">logMAR 0,70</span> · <span id="xhLabel">2,9 мм</span><br>
-        40 см · режим <b id="modeLabel">обычный</b>
+        <b id="xhLabel">3,2 мм</b><br>
+        режим <b id="modeLabel">обычный</b>
       </div>
       <button class="calib-btn" onclick="backCalib()">Калибровка</button>
     </div>
@@ -135,52 +150,174 @@
       <button id="btnNormal" class="on" onclick="setMode('normal')">Обычный</button>
       <button id="btnInvert" onclick="setMode('invert')">Инверсия</button>
       <button id="btnYellow" onclick="setMode('yellow')">Жёлтый</button>
+      <button id="btnCream" onclick="setMode('cream')">Кремовый</button>
+      <button id="btnBlue" onclick="setMode('blue')">Голубой</button>
       <button id="btnBold" onclick="toggleBold()">Жирный</button>
+      <button id="btnFont" onclick="toggleFont()">Verdana</button>
+      <button id="btnLine" onclick="cycleLine()">Строки 1,05</button>
+      <button id="btnLetter" onclick="cycleLetter()">Буквы 0</button>
+      <button id="btnTypo" onclick="toggleTypo()">Типоскоп</button>
     </div>
   </div>
 </section>
 
 <script>
-  var XHEIGHT_1M = 1.454, TARGET_MM = 50;
-  var pxPerMm = 5.49, xRatio = 0.52, mode='normal', bold=false;
-
-  var FIELD = {
-    normal: {bg:'#ffffff', fg:'#000000'},
-    invert: {bg:'#000000', fg:'#ffffff'},
-    yellow: {bg:'#000000', fg:'#ffd60a'}
+  var TARGET_MM = 50;
+  var pxPerMm = 5.49, mode='normal', bold=false, font='system';
+  // Пробы интервалов (шаг 4б): межстрочный — множитель кегля, межбуквенный — доля кегля.
+  // На высоту строчной буквы не влияют.
+  var LINE_STEPS = [1.05, 1.3, 1.6], LETTER_STEPS = [0, 0.05, 0.1];
+  var lineIdx = 0, letterIdx = 0;
+  // Типоскоп: окно чтения высотой в одну строку, положение — доля высоты поля.
+  var typo = false, slotY = 0.5;
+  // Шрифты: system — эталон измерения (как в претесте); verdana — проба по шагу 4б,
+  // не эталон. Доля строчной буквы в кегле у каждого шрифта своя и меряется отдельно,
+  // чтобы высота строчной в мм при переключении не менялась.
+  var FONTS = {
+    system: '-apple-system,"Helvetica Neue",Arial,sans-serif',
+    verdana: 'Verdana,"DejaVu Sans",sans-serif'
   };
-  var MODE_NAME = {normal:'обычный', invert:'инверсия', yellow:'жёлтый'};
-
-  var LADDER = [
-    [8.0,  "бабушка испекла вкусный сладкий пирог с яблоками для семьи"],
-    [6.3,  "маленький мальчик нашёл сегодня во дворе пушистого котёнка"],
-    [5.0,  "летом мы поедем всей семьёй к тёплому морю и будем купаться"],
-    [4.0,  "папа купил новый красивый велосипед для своего младшего сына"],
-    [3.2,  "дети с большим интересом читали книгу про жаркие южные страны"],
-    [2.5,  "зимой деревья в парке покрылись пушистым белым мягким снегом"],
-    [2.0,  "наша весёлая собака любит бегать по зелёному полю за мячом"],
-    [1.6,  "мама приготовила на завтрак сладкую молочную кашу с маслом"],
-    [1.25, "учитель рассказал нам удивительную историю о далёком космосе"],
-    [1.0,  "осенью перелётные птицы собираются в большие стаи и улетают"],
-    [0.8,  "девочка нарисовала яркими красками красивый деревянный дом"],
-    [0.63, "в выходные друзья ходили вместе в кино на интересный фильм"],
-    [0.5,  "дедушка посадил в нашем саду молодую яблоню и сладкую грушу"],
-    [0.4,  "весёлые ребята построили из песка высокий замок у самой воды"]
-  ];
-  var idx = 6;
-
-  function fmt(x, d){ return x.toFixed(d).replace('.', ','); }
-
-  (function(){
+  var xRatioCache = {};
+  function xRatioFor(fam){
+    if(xRatioCache[fam]) return xRatioCache[fam];
+    var r = 0.52;
     try{
       var c=document.createElement('canvas'), ctx=c.getContext('2d');
-      var fam=getComputedStyle(document.getElementById('sentence')).fontFamily;
       var S=200; ctx.font=S+'px '+fam; ctx.textBaseline='alphabetic';
       var m=ctx.measureText('н');
       var xh=(m.actualBoundingBoxAscent||0)+(m.actualBoundingBoxDescent||0);
-      if(xh>0) xRatio = xh/S;
+      if(xh>0) r = xh/S;
     }catch(e){}
-  })();
+    xRatioCache[fam] = r; return r;
+  }
+
+  // Режимы поля. normal — эталон измерения. invert и yellow — пробы; yellow и оттенки
+  // (cream, blue) — экспериментальные, вне протокола: не имитация настроек iOS,
+  // а просто цвет поля, чтобы увидеть, есть ли эффект. light — светлый фон
+  // (для цвета шторок типоскопа).
+  var FIELD = {
+    normal: {bg:'#ffffff', fg:'#000000', light:true},
+    invert: {bg:'#000000', fg:'#ffffff'},
+    yellow: {bg:'#000000', fg:'#ffd60a'},
+    cream:  {bg:'#fbf3dc', fg:'#000000', light:true},
+    blue:   {bg:'#e4f0fb', fg:'#000000', light:true}
+  };
+  var MODE_NAME = {normal:'обычный', invert:'инверсия', yellow:'жёлтый', cream:'кремовый', blue:'голубой'};
+  var MODE_BTN = {normal:'btnNormal', invert:'btnInvert', yellow:'btnYellow', cream:'btnCream', blue:'btnBlue'};
+
+  // Лестница: [высота строчной буквы в мм, набор равнотрудных фраз].
+  // Ступени — ряд R10 (каждая следующая в 1,26 раза крупнее, ≈ 0,1 logMAR);
+  // единицы M и logMAR в интерфейсе не показываются — методика v0.6 фиксирует
+  // только миллиметры. Фразы одной ступени чередуются при каждом показе,
+  // чтобы при пробах (инверсия, жирный) пациент не читал одну и ту же.
+  // Правила набора: лексика начальной школы, 58–62 знака, одно длинное
+  // слово (9+ букв), остальные короче.
+  var LADDER = [
+    [12.5, ["зимним вечером вся семья собралась у тёплой печки с пирогами",
+            "летом в лагере ребята каждый день купались в прохладном озере",
+            "рано утром дети отправились на речку ловить рыбу с дедушкой",
+            "в воскресенье мы всей семьёй ходили в цирк смотреть на львов",
+            "мама купила на рынке спелые груши и сладкие мандарины к обеду"]],
+    [10, ["бабушка испекла вкусный сладкий пирог с яблоками для семьи",
+            "летом в деревне мы с братом ловили рыбу на маленькой речке",
+            "на кухне вкусно пахло свежим хлебом и молоком с земляникой",
+            "дети слепили во дворе большого снеговика с метлой и ведром",
+            "утром рыжая кошка сидела на подоконнике и смотрела на птиц"]],
+    [8.0, ["маленький мальчик нашёл сегодня во дворе пушистого котёнка",
+            "в лесу под старой ёлкой ребята нашли много крепких боровиков",
+            "у соседей во дворе живёт большая добрая собака с ошейником",
+            "по синему небу над рекой плыл большой воздушный шар с людьми",
+            "тёплым вечером вся семья пила чай с пирожными на веранде дома"]],
+    [6.3, ["летом мы поедем всей семьёй к тёплому морю и будем купаться",
+            "на день рождения брат подарил мне набор акварельных красок",
+            "весной в нашем саду распустились яблони и стало очень красиво",
+            "рано утром мы отправились на речку и увидели там серую цаплю",
+            "в столовой сегодня давали горячие блины с клубничным вареньем"]],
+    [5.0, ["папа купил новый красивый велосипед для своего младшего сына",
+            "по дороге домой мы купили в кондитерской сладкие пряники и чай",
+            "дети повесили на ёлку яркие шары и длинную новогоднюю гирлянду",
+            "старший брат научил меня кататься на роликовых коньках в парке",
+            "в парке дети кормили голубей и уток кусочками белого хлеба"]],
+    [4.0, ["дети с большим интересом читали книгу про жаркие южные страны",
+            "маленькая сестра любит слушать сказки перед сном каждый день",
+            "в зоопарке мы долго смотрели на смешных полосатых зебр и львов",
+            "осенью мы собирали в парке разноцветные листья для букетов",
+            "папа сделал для птиц деревянную кормушку и повесил на берёзу"]],
+    [3.2, ["зимой деревья в парке покрылись пушистым белым мягким снегом",
+            "на уроке рисования все дети рисовали радугу над зелёным лесом",
+            "летом бабушка варит в большом тазу вкусное земляничное варенье",
+            "во дворе мальчишки играли в футбол до самого позднего вечера",
+            "по утрам мама поливает из лейки душистые цветы на подоконнике"]],
+    [2.5, ["наша весёлая собака любит бегать по зелёному полю за мячом",
+            "зимой мы катались с высокой горы на санках и лепили снеговика",
+            "на прогулке дети собирали еловые шишки для новогодних поделок",
+            "в субботу к нам приехала тётя из большого северного города",
+            "в библиотеке мальчик выбрал большую книгу про морских животных"]],
+    [2.0, ["мама приготовила на завтрак сладкую молочную кашу с маслом",
+            "в конце лета на огороде созрели крупные оранжевые тыквы и репа",
+            "утром папа разбудил нас и повёл с удочками на маленькое озеро",
+            "девочка быстро научилась решать трудные примеры и задачи в уме",
+            "в саду под окном растёт старая яблоня и серебристая ёлочка"]],
+    [1.6, ["учитель рассказал нам удивительную историю о далёком космосе",
+            "на зимние каникулы мы ездили к бабушке в маленький посёлок",
+            "школьники посадили вдоль дороги молодые тонкие берёзки и липы",
+            "весёлый щенок носился по лужайке и лаял на пролетающих птиц",
+            "мама испекла к празднику вкусные пирожки с капустой и грибами"]],
+    [1.25, ["осенью перелётные птицы собираются в большие стаи и улетают",
+            "по вечерам дедушка читает нам вслух интересные рассказы о море",
+            "на книжной полке стоит большой глобус и старинные часы с боем",
+            "летом мальчишки ходили на речку купаться и ловить пескарей",
+            "после летнего дождя над полем появилась яркая красивая радуга"]],
+    [1.0, ["девочка нарисовала яркими красками красивый деревянный дом",
+            "в первый день осени дети принесли учительнице букеты цветов",
+            "мой младший брат построил из деревянных кубиков высокую башню",
+            "во дворе ребята пускали в небо большого разноцветного змея",
+            "ранним утром на зелёной траве блестели маленькие капли росы"]],
+    [0.8, ["в выходные друзья ходили вместе в кино на интересный фильм",
+            "весной на лесное озеро прилетели белые лебеди и серые утки",
+            "мы с папой всю субботу чинили старый деревянный забор у дома",
+            "на новогодний праздник дети водили хоровод вокруг ёлки в зале",
+            "на лесной поляне росла душистая земляника и щебетали птицы"]],
+    [0.63, ["дедушка посадил в нашем саду молодую яблоню и сладкую грушу",
+            "вчера вечером над городом прошла гроза с громкими раскатами",
+            "бабушка связала внуку тёплые варежки и длинный полосатый шарф",
+            "ребята нашли под крыльцом маленького рыжего щенка и котёнка",
+            "на уроке труда мы вырезали из бумаги снежинки для украшения"]],
+    [0.5, ["весёлые ребята построили из песка высокий замок у самой воды",
+            "в зоопарке дети долго смотрели на огромного белого медведя",
+            "летом мы всей семьёй ходили в лес за черникой и земляникой",
+            "на кухне мама готовила праздничный обед и напевала песенку",
+            "утром по дороге в школу мальчик встретил своих одноклассников"]]
+  ];
+  var idx = 6;   // стартовая ступень 3,2 мм
+  var seen = LADDER.map(function(){ return 0; });   // сколько раз показана каждая ступень
+  var phrase = '';
+  function nextPhrase(){
+    var list = LADDER[idx][1];
+    phrase = list[seen[idx] % list.length];
+    seen[idx]++;
+  }
+
+  // Известные устройства — стартовое значение px/мм, которое всё равно проверяется
+  // линейкой. measured: снято линейкой/лупой на реальном устройстве (approx —
+  // приблизительно). Остальные — расчёт по характеристикам экрана (CSS-ширина ÷
+  // физическая ширина); на измеренных устройствах расчёт расходился с линейкой
+  // на 9% (iPhone 11 Pro Max) и 34% (iPad Pro 12,9″) из-за режима экрана.
+  var DEVICES = [
+    {name:'iPhone 11 Pro Max', ppmm:5.49, measured:true},
+    {name:'iPad Pro 12,9″', ppmm:3.9, measured:true, approx:true},
+    {name:'iPhone 15 / 16', ppmm:6.06},
+    {name:'iPhone 15 Plus / 16 Plus', ppmm:6.03},
+    {name:'iPhone 17 Pro', ppmm:6.01},
+    {name:'iPhone SE (2022)', ppmm:6.41},
+    {name:'iPad (10-го пок.) / Air 11″', ppmm:5.19},
+    {name:'iPad mini (6-го пок.)', ppmm:6.43},
+    {name:'Samsung Galaxy S23 / S24', ppmm:5.54},
+    {name:'Samsung Galaxy A54 / A55', ppmm:6.05},
+    {name:'Google Pixel 8', ppmm:6.38},
+    {name:'Xiaomi Redmi Note 13', ppmm:5.65}
+  ];
+  var STORE_KEY = 'catis_calib';   // память браузера: {ppmm, date}
 
   var bar=document.getElementById('bar'), barEnd=document.getElementById('barEnd');
   var slider=document.getElementById('slider'), ppmmEl=document.getElementById('ppmm');
@@ -201,47 +338,125 @@
   }
   slider.addEventListener('input', function(){ setPPMM(parseFloat(slider.value)); });
 
+  var deviceSel=document.getElementById('deviceSel'), calibNote=document.getElementById('calibNote');
+  var grpMeasured=document.createElement('optgroup'), grpCalc=document.createElement('optgroup');
+  grpMeasured.label='Измерено линейкой'; grpCalc.label='Расчётно — обязательно проверить линейкой';
+  DEVICES.forEach(function(d, i){
+    var o=document.createElement('option'); o.value=i;
+    o.textContent = d.name + ' — ' + d.ppmm.toFixed(2).replace('.', ',') + (d.approx ? ' (приблизительно)' : '');
+    (d.measured ? grpMeasured : grpCalc).appendChild(o);
+  });
+  deviceSel.appendChild(grpMeasured); deviceSel.appendChild(grpCalc);
+  function applyDevice(){
+    var d = DEVICES[deviceSel.value];
+    if(!d) return;
+    setPPMM(d.ppmm);
+    calibNote.textContent = d.name + ': ' + (d.measured ? 'измеренное' + (d.approx ? ', приблизительное' : '') : 'расчётное') + ' значение — проверьте линейкой.';
+  }
+  // Память браузера. Это кэш, не хранилище: Safari может стереть его,
+  // если тест не открывали больше недели. Все обращения — в try/catch.
+  function saveCalib(){
+    try{ localStorage.setItem(STORE_KEY, JSON.stringify({ppmm:pxPerMm, date:new Date().toISOString().slice(0,10)})); }catch(e){}
+  }
+  function loadCalib(){
+    try{
+      var c = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+      if(c && !isNaN(parseFloat(c.ppmm))){
+        setPPMM(parseFloat(c.ppmm));
+        var d = (c.date||'').split('-');
+        calibNote.textContent = 'Сохранённое значение для этого браузера' + (d.length===3 ? ' от '+d[2]+'.'+d[1]+'.'+d[0] : '') + '. Если экран или его режим менялись — проверьте линейкой.';
+        return true;
+      }
+    }catch(e){}
+    calibNote.textContent = 'Сохранённого значения нет: выберите устройство или подберите по линейке.';
+    return false;
+  }
+
   function show(id){
     document.querySelectorAll('.screen').forEach(function(s){s.classList.remove('active');});
     document.getElementById(id).classList.add('active');
   }
-  function goTest(){ show('test'); render(); }
+  function goTest(){ saveCalib(); show('test'); nextPhrase(); render(); }
   function backCalib(){ show('calib'); renderBar(); }
 
   function render(){
-    var M = LADDER[idx][0], s = LADDER[idx][1];
-    var xMm = M * XHEIGHT_1M;
-    var fontPx = (xMm * pxPerMm) / xRatio;
-    var logmar = Math.log(M/0.4)/Math.LN10;
+    var xMm = LADDER[idx][0], s = phrase;
+    var fam = FONTS[font];
+    var fontPx = (xMm * pxPerMm) / xRatioFor(fam);
     var f = FIELD[mode];
     var el = document.getElementById('sentence');
     el.style.fontSize = fontPx.toFixed(2)+'px';
+    el.style.fontFamily = fam;
+    el.style.lineHeight = String(LINE_STEPS[lineIdx]);
+    el.style.letterSpacing = LETTER_STEPS[letterIdx] ? LETTER_STEPS[letterIdx]+'em' : '0';
     el.style.color = f.fg;
     el.style.fontWeight = bold ? '700' : '400';
     el.textContent = s;
     document.querySelector('#test .field').style.background = f.bg;
-    document.getElementById('mLabel').textContent = fmt(M,(M%1?2:1)) + ' M';
-    document.getElementById('logmarLabel').textContent = 'logMAR ' + fmt(logmar,2);
-    document.getElementById('xhLabel').textContent = fmt(xMm,2) + ' мм';
-    document.getElementById('modeLabel').textContent = MODE_NAME[mode] + (bold ? ' · жирный' : '');
+    document.getElementById('xhLabel').textContent = String(xMm).replace('.', ',') + ' мм';
+    document.getElementById('modeLabel').textContent = MODE_NAME[mode] + (bold ? ' · жирный' : '') + (font==='verdana' ? ' · Verdana' : '')
+      + (lineIdx ? ' · строки ' + fmtRu(LINE_STEPS[lineIdx]) : '') + (letterIdx ? ' · буквы +' + Math.round(LETTER_STEPS[letterIdx]*100) + '%' : '');
+    renderTypo(fontPx);
     document.getElementById('btnBigger').disabled = (idx===0);
     document.getElementById('btnSmaller').disabled = (idx===LADDER.length-1);
   }
-  function step(d){ idx=Math.min(LADDER.length-1, Math.max(0, idx+d)); render(); }
+  function step(d){ idx=Math.min(LADDER.length-1, Math.max(0, idx+d)); nextPhrase(); render(); }
   function setMode(m){
     mode=m;
-    document.getElementById('btnNormal').classList.toggle('on', m==='normal');
-    document.getElementById('btnInvert').classList.toggle('on', m==='invert');
-    document.getElementById('btnYellow').classList.toggle('on', m==='yellow');
+    for(var k in MODE_BTN) document.getElementById(MODE_BTN[k]).classList.toggle('on', k===m);
+    nextPhrase(); render();
+  }
+  function fmtRu(x){ return String(x).replace('.', ','); }
+  function cycleLine(){
+    lineIdx = (lineIdx + 1) % LINE_STEPS.length;
+    var b = document.getElementById('btnLine');
+    b.textContent = 'Строки ' + fmtRu(LINE_STEPS[lineIdx]); b.classList.toggle('on', lineIdx>0);
+    nextPhrase(); render();
+  }
+  function cycleLetter(){
+    letterIdx = (letterIdx + 1) % LETTER_STEPS.length;
+    var b = document.getElementById('btnLetter');
+    b.textContent = 'Буквы ' + (letterIdx ? '+' + Math.round(LETTER_STEPS[letterIdx]*100) + '%' : '0'); b.classList.toggle('on', letterIdx>0);
+    nextPhrase(); render();
+  }
+  var fieldEl = document.getElementById('field');
+  function toggleTypo(){
+    typo = !typo;
+    fieldEl.classList.toggle('typo', typo);
+    document.getElementById('btnTypo').classList.toggle('on', typo);
     render();
+  }
+  function renderTypo(fontPx){
+    if(!typo) return;
+    var h = fieldEl.clientHeight, slot = fontPx * LINE_STEPS[lineIdx] * 1.15;
+    var top = Math.max(0, Math.min(h - slot, slotY * h - slot / 2));
+    var shade = FIELD[mode].light ? 'rgba(0,0,0,.72)' : 'rgba(140,140,140,.72)';
+    var t = document.getElementById('shadeTop'), b = document.getElementById('shadeBottom');
+    t.style.height = top + 'px'; t.style.background = shade;
+    b.style.height = Math.max(0, h - top - slot) + 'px'; b.style.background = shade;
+  }
+  function moveSlot(e){
+    if(!typo || !(e.buttons & 1 || e.pointerType === 'touch')) return;
+    var r = fieldEl.getBoundingClientRect();
+    slotY = Math.max(0, Math.min(1, (e.clientY - r.top) / r.height));
+    renderTypo(parseFloat(document.getElementById('sentence').style.fontSize));
+  }
+  fieldEl.addEventListener('pointerdown', moveSlot);
+  fieldEl.addEventListener('pointermove', moveSlot);
+  window.addEventListener('resize', function(){ if(typo) render(); });
+  function toggleFont(){
+    font = (font==='verdana') ? 'system' : 'verdana';
+    document.getElementById('btnFont').classList.toggle('on', font==='verdana');
+    nextPhrase(); render();
   }
   function toggleBold(){
     bold=!bold;
     document.getElementById('btnBold').classList.toggle('on', bold);
-    render();
+    nextPhrase(); render();
   }
 
   renderBar();
+  loadCalib();
   document.addEventListener('gesturestart', function(e){e.preventDefault();});
 </script>
 </body>
