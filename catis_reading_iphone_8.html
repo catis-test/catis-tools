@@ -76,15 +76,14 @@
   /* Широкий экран (iPad): панель сбоку, поле чтения во всю высоту */
   @media (min-width:700px){
     #test{flex-direction:row;}
-    .side{width:250px; border-top:none; border-left:1px solid var(--line);
+    .side{width:172px; border-top:none; border-left:1px solid var(--line);
       display:flex; flex-direction:column; overflow-y:auto;}
     .side .meta{flex-direction:column; align-items:stretch;}
     .calib-btn{margin-top:10px; width:100%;}
-    /* Кнопки в две колонки, чтобы все пробы помещались без прокрутки;
-       «Крупнее / Мельче» — во всю ширину */
-    .ctrls{display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:12px;}
-    .ctrls button{width:100%; min-width:0; padding:9px 4px; font-size:13px;}
-    #btnBigger, #btnSmaller{grid-column:1 / -1; padding:12px 6px; font-size:15px;}
+    /* Одна колонка кнопок — решение Кирилла 07.09.2026: на его iPad всё
+       помещается; если перестанет — убрать дублирующие оттенки, не менять сетку */
+    .ctrls{flex-direction:column; flex-wrap:nowrap; margin-top:12px;}
+    .ctrls button{width:100%; min-width:0;}
   }
 </style>
 </head>
@@ -132,7 +131,7 @@
     </div>
     <!-- Дата версии: менять при каждой публикации в catis-tools, чтобы на iPad
          было видно, какая версия загрузилась (ярлык кэширует старую) -->
-    <p id="version">CATIS-тест · версия 07.09.2026 (4)</p>
+    <p id="version">CATIS-тест · версия 07.09.2026 (5)</p>
   </div>
 </section>
 
