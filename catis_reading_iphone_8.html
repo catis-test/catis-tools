@@ -45,7 +45,8 @@
   .manual select{flex:1; min-width:160px; padding:10px; font-size:16px; border:1px solid var(--line); border-radius:9px; background:#fff; color:var(--ink);}
   .save-wrap{margin:16px 0;}
   .gap{height:34px;}
-  .barwrap{background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px 16px 90px;}
+  .barwrap{background:#fff; border:1px solid var(--line); border-radius:14px; padding:16px 16px 90px; position:relative;}
+  #version{position:absolute; right:16px; bottom:10px; margin:0; font-size:12px; color:var(--muted);}
   .barlabel{font-size:13px; color:var(--muted); margin-bottom:12px;}
   .bar-track{position:relative; height:40px; display:flex; align-items:center;}
   .bar{height:18px; background:var(--accent); border-radius:4px;}
@@ -126,10 +127,10 @@
       <div id="bar" class="bar"></div>
       <div id="barEnd" class="bar-end"></div>
     </div>
+    <!-- Дата версии: менять при каждой публикации в catis-tools, чтобы на iPad
+         было видно, какая версия загрузилась (ярлык кэширует старую) -->
+    <p id="version">CATIS-тест · версия 07.09.2026</p>
   </div>
-  <!-- Дата версии: менять при каждой публикации в catis-tools, чтобы на iPad
-       было видно, какая версия загрузилась (ярлык кэширует старую) -->
-  <p class="sub" id="version" style="margin-top:14px">CATIS-тест · версия 07.09.2026</p>
 </section>
 
 <!-- ===================== ТЕСТ ===================== -->
