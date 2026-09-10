@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="light only">
+<title>CATIS-смарт-тест · калибровка экрана</title>
+<style>
+  /* CATIS-смарт-тест: калибровка смартфона по линейке.
+     Задача страницы одна: показать полосу ровно 50 мм, выверенную линейкой,
+     и рядом — карточку с числами, которые нужны скрипту для измерения
+     скриншотов (tools/catis_smart_measure.py). Страница не меряет зрение
+     и не заменяет CATIS-тест. Фон всегда белый, полоса всегда чёрная:
+     скрипт ищет на скриншоте длинный чёрный прямоугольник. */
+  :root{ --ink:#111; --muted:#4b5563; --line:#c9ced6; --accent:#245c59; --focus:#1d4ed8; }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; background:#fff; color:var(--ink);}
+  body{
+    font-family:-apple-system,"Helvetica Neue",Arial,sans-serif; font-size:17px; line-height:1.4;
+    -webkit-text-size-adjust:100%;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  main{padding:8px 16px 40px;}
+  h1{font-size:21px; margin:4px 0 0;}
+  .sub{color:var(--muted); margin:0 0 6px; font-size:14px;}
+  ol{margin:0 0 4px; padding-left:20px; font-size:15px; line-height:1.3;}
+  ol li{margin:1px 0;}
+
+  /* Шкала и полоса. Всё позиционируется скриптом в CSS-пикселях. */
+  .ruler-wrap{position:relative; height:106px; margin:2px 0 4px;}
+  .scale{position:absolute; left:0; top:0; height:34px; width:100%;}
+  .tick{position:absolute; bottom:0; width:1px; background:#111;}
+  .tick.t1{height:8px;}
+  .tick.t5{height:14px;}
+  .tick.t10{height:22px;}
+  .num{position:absolute; top:0; font-size:12px; transform:translateX(-50%); color:#111;}
+  #bar{position:absolute; left:0; top:38px; height:44px; background:#000;}
+  .barlabel{position:absolute; left:0; top:86px; font-size:13px; color:var(--muted);}
+
+  /* Управление коэффициентом */
+  .ctl{display:flex; gap:8px; align-items:center; margin:4px 0;}
+  .ctl button{flex:1; min-height:48px; font-size:17px;}
+  .val{flex:1.4; text-align:center; font-size:20px; font-variant-numeric:tabular-nums;}
+  input[type=range]{width:100%; height:40px; margin:0;}
+  button, select, input[type=text]{
+    font-family:inherit; font-size:17px; color:var(--ink); background:#fff;
+    border:1px solid var(--line); border-radius:10px; padding:10px 12px; min-height:48px;
+  }
+  button:active{background:#eef1f5;}
+  .primary{background:var(--accent); color:#fff; border-color:var(--accent); width:100%; margin-top:8px;}
+  :focus-visible{outline:3px solid var(--focus); outline-offset:2px;}
+  label{display:block; font-size:15px; color:var(--muted); margin:10px 0 4px;}
+  select, input[type=text]{width:100%;}
+  .note{font-size:15px; color:var(--muted); margin:8px 0;}
+
+  /* Карточка для скриншота: крупный моноширинный текст, читается со скриншота
+     человеком и распознаётся при разборе. */
+  .card{
+    border:2px solid #111; border-radius:8px; padding:8px 10px; margin:6px 0 6px;
+    font-family:Menlo,"Courier New",monospace; font-size:13.5px; line-height:1.4;
+    white-space:pre-wrap; word-break:break-word;
+  }
+  .card b{font-weight:700;}
+  .warn{border:2px solid #b45309; border-radius:8px; padding:10px 12px; margin:10px 0; font-size:15px;}
+  .warn[hidden]{display:none;}
+  .version{font-size:13px; color:var(--muted); margin-top:16px;}
+</style>
+</head>
+<body>
+<main>
+  <h1>CATIS-смарт-тест</h1>
+  <p class="sub">Калибровка экрана смартфона по линейке для измерения скриншотов</p>
+
+  <ol>
+    <li>Линейку к чёрной полосе, ноль — к левому краю.</li>
+    <li>Подгоните полосу ровно до 50 мм: штрихи шкалы должны совпасть со штрихами линейки по всей длине.</li>
+    <li>Нажмите «Сохранить» и сделайте скриншот: полоса и карточка на одном экране.</li>
+  </ol>
+
+  <div class="ruler-wrap" aria-label="Калибровочная полоса">
+    <div class="scale" id="scale" aria-hidden="true"></div>
+    <div id="bar" role="img" aria-label="Чёрная полоса, должна равняться 50 миллиметрам"></div>
+    <div class="barlabel">Эта полоса должна равняться 50 мм на линейке</div>
+  </div>
+
+  <div class="ctl" role="group" aria-label="Подгонка коэффициента">
+    <button type="button" onclick="nudge(-0.1)" aria-label="Минус одна десятая">−0,1</button>
+    <button type="button" onclick="nudge(-0.01)" aria-label="Минус одна сотая">−0,01</button>
+    <div class="val" aria-live="polite"><b id="ppmm">6.01</b> px/мм</div>
+    <button type="button" onclick="nudge(0.01)" aria-label="Плюс одна сотая">+0,01</button>
+    <button type="button" onclick="nudge(0.1)" aria-label="Плюс одна десятая">+0,1</button>
+  </div>
+  <input type="range" id="slider" min="3.5" max="8" step="0.01" value="6.01" aria-label="Коэффициент, пикселей на миллиметр" oninput="setPPMM(parseFloat(this.value))">
+
+  <div class="warn" id="warn" hidden></div>
+  <div class="card" id="card" aria-label="Карточка калибровки"></div>
+
+  <label for="deviceSel">Стартовое значение (всё равно проверяется линейкой)</label>
+  <select id="deviceSel" onchange="pickDevice()"></select>
+
+  <label for="deviceName">Название телефона — попадёт в карточку</label>
+  <input type="text" id="deviceName" placeholder="например, iPhone 17 Pro" autocomplete="off" oninput="renderCard()">
+
+  <button type="button" class="primary" onclick="saveCalib()">Сохранить</button>
+  <p class="note" id="saveNote"></p>
+
+
+  <p class="note">Скриншот передавайте на компьютер через AirDrop или как файл: мессенджер «как фото» сжимает картинку, и коэффициент перестаёт быть верным.</p>
+
+  <p class="version">CATIS-смарт-тест, версия 10.09.2026</p>
+</main>
+
+<script>
+  var TARGET_MM = 50;           // длина полосы
+  var STORE_KEY = 'catis_smart_calib';   // отдельный ключ: не пересекается с памятью CATIS-теста на том же адресе
+  var pxPerMm = 6.01;
+
+  // Стартовые значения, как в CATIS-тесте: measured — снято линейкой на реальном
+  // устройстве, остальные — расчёт по характеристикам экрана. Расчёт расходится
+  // с линейкой до 34% из-за режима «Увеличение экрана», поэтому линейка обязательна.
+  var DEVICES = [
+    {name:'iPhone 17 Pro', ppmm:6.01},
+    {name:'iPhone 15 / 16', ppmm:6.06},
+    {name:'iPhone 15 Plus / 16 Plus', ppmm:6.03},
+    {name:'iPhone SE (2022)', ppmm:6.41},
+    {name:'iPhone 11 Pro Max', ppmm:5.49, measured:true},
+    {name:'Samsung Galaxy S23 / S24', ppmm:5.54},
+    {name:'Samsung Galaxy A54 / A55', ppmm:6.05},
+    {name:'Google Pixel 8', ppmm:6.38},
+    {name:'Xiaomi Redmi Note 13', ppmm:5.65}
+  ];
+
+  var bar=document.getElementById('bar'), scale=document.getElementById('scale');
+  var slider=document.getElementById('slider'), ppmmEl=document.getElementById('ppmm');
+  var card=document.getElementById('card'), warn=document.getElementById('warn');
+  var deviceSel=document.getElementById('deviceSel'), deviceName=document.getElementById('deviceName');
+  var saveNote=document.getElementById('saveNote');
+  var savedDate = null;
+
+  function renderBar(){
+    var w = pxPerMm * TARGET_MM;
+    bar.style.width = w + 'px';
+    ppmmEl.textContent = pxPerMm.toFixed(2);
+    slider.value = pxPerMm.toFixed(2);
+    // Шкала: штрих каждый миллиметр, длиннее каждые 5 и 10, цифры каждые 10.
+    var html = '';
+    for (var mm = 0; mm <= TARGET_MM; mm++){
+      var x = mm * pxPerMm;
+      var cls = mm % 10 === 0 ? 't10' : (mm % 5 === 0 ? 't5' : 't1');
+      html += '<div class="tick ' + cls + '" style="left:' + x + 'px"></div>';
+      if (mm % 10 === 0) html += '<div class="num" style="left:' + x + 'px">' + mm + '</div>';
+    }
+    scale.innerHTML = html;
+    renderCard();
+  }
+  function setPPMM(v){
+    pxPerMm = Math.min(8, Math.max(3.5, Math.round(v * 100) / 100));
+    renderBar();
+  }
+  function nudge(d){ setPPMM(pxPerMm + d); }
+
+  function pad2(n){ return (n < 10 ? '0' : '') + n; }
+  function today(){ var d = new Date(); return pad2(d.getDate()) + '.' + pad2(d.getMonth()+1) + '.' + d.getFullYear(); }
+
+  // Карточка. Всё, что нужно скрипту и человеку, чтобы понять скриншот:
+  // коэффициент в CSS-пикселях, масштаб экрана, ожидаемое число пикселей
+  // на миллиметр на скриншоте и ожидаемый размер скриншота.
+  function renderCard(){
+    var dpr = window.devicePixelRatio || 1;
+    var sw = screen.width, sh = screen.height;
+    var shot = (pxPerMm * dpr);
+    var name = deviceName.value.trim() || '(не указано)';
+    card.innerHTML =
+      '<b>CATIS-смарт-тест · калибровка</b>\n' +
+      'Телефон: ' + name + '\n' +
+      'Коэффициент: <b>' + pxPerMm.toFixed(2) + ' px/мм</b> (CSS)\n' +
+      'Масштаб экрана (DPR): ' + dpr + '\n' +
+      'На скриншоте ожидается: <b>' + shot.toFixed(2) + ' px/мм</b>\n' +
+      'Полоса 50 мм: ' + (pxPerMm * TARGET_MM).toFixed(1) + ' CSS px = ' + (shot * TARGET_MM).toFixed(0) + ' px\n' +
+      'Экран: ' + sw + ' × ' + sh + ' CSS px → скриншот ' + Math.round(sw*dpr) + ' × ' + Math.round(sh*dpr) + ' px\n' +
+      'Дата: ' + today() + (savedDate ? ' · сохранено ' + savedDate : ' · НЕ СОХРАНЕНО');
+    checkWarn();
+  }
+
+  function checkWarn(){
+    var msgs = [];
+    if (window.innerWidth > window.innerHeight) msgs.push('Телефон повёрнут. Снимайте в портретной ориентации.');
+    if (Math.abs(window.visualViewport ? window.visualViewport.scale - 1 : 0) > 0.01) msgs.push('Страница увеличена жестом. Сведите пальцами к масштабу 1.');
+    warn.textContent = msgs.join(' ');
+    warn.hidden = msgs.length === 0;
+  }
+
+  // Список устройств
+  DEVICES.forEach(function(d, i){
+    var o = document.createElement('option');
+    o.value = i;
+    o.textContent = d.name + ' — ' + d.ppmm.toFixed(2) + (d.measured ? ' (измерено линейкой)' : ' (расчёт)');
+    deviceSel.appendChild(o);
+  });
+  var o0 = document.createElement('option'); o0.value = ''; o0.textContent = 'Выберите телефон…';
+  deviceSel.insertBefore(o0, deviceSel.firstChild); deviceSel.value = '';
+  function pickDevice(){
+    var i = deviceSel.value; if (i === '') return;
+    var d = DEVICES[+i];
+    setPPMM(d.ppmm);
+    if (!deviceName.value.trim()) { deviceName.value = d.name; }
+    savedDate = null; renderCard();
+    saveNote.textContent = 'Стартовое значение для ' + d.name + '. Проверьте линейкой и сохраните.';
+  }
+
+  function saveCalib(){
+    savedDate = today();
+    try{
+      localStorage.setItem(STORE_KEY, JSON.stringify({ppmm:pxPerMm, name:deviceName.value.trim(), date:savedDate, dpr:window.devicePixelRatio||1, sw:screen.width, sh:screen.height}));
+      saveNote.textContent = 'Сохранено ' + savedDate + '. Теперь сделайте скриншот этого экрана.';
+    }catch(e){
+      saveNote.textContent = 'Память браузера недоступна, значение не сохранено. Скриншот всё равно годится: коэффициент записан в карточке.';
+    }
+    renderCard();
+  }
+  function loadCalib(){
+    var raw = null;
+    try{ raw = localStorage.getItem(STORE_KEY); }catch(e){}
+    if (!raw){ saveNote.textContent = 'Сохранённого значения нет: выберите телефон из списка или подберите линейкой.'; renderBar(); return; }
+    try{
+      var d = JSON.parse(raw);
+      pxPerMm = d.ppmm; deviceName.value = d.name || ''; savedDate = d.date || null;
+      var changed = (d.dpr && d.dpr !== (window.devicePixelRatio||1)) || (d.sw && d.sw !== screen.width) || (d.sh && d.sh !== screen.height);
+      saveNote.textContent = 'Сохранённое значение от ' + (d.date || '?') + (changed ? '. ВНИМАНИЕ: режим экрана с тех пор изменился — обязательно проверьте линейкой.' : '. Если экран или его режим менялись — проверьте линейкой.');
+      if (changed) savedDate = null;
+    }catch(e){}
+    renderBar();
+  }
+
+  window.addEventListener('resize', renderCard);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', renderCard);
+  loadCalib();
+</script>
+</body>
+</html>
