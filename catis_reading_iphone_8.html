@@ -131,7 +131,7 @@
     </div>
     <!-- Дата версии: менять при каждой публикации в catis-tools, чтобы на iPad
          было видно, какая версия загрузилась (ярлык кэширует старую) -->
-    <p id="version">CATIS-тест · версия 07.09.2026 (5)</p>
+    <p id="version">CATIS-тест · версия 11.09.2026</p>
   </div>
 </section>
 
@@ -318,13 +318,15 @@
   // линейкой. measured: снято линейкой/лупой на реальном устройстве (approx —
   // приблизительно). Остальные — расчёт по характеристикам экрана (CSS-ширина ÷
   // физическая ширина); на измеренных устройствах расчёт расходился с линейкой
-  // на 9% (iPhone 11 Pro Max) и 34% (iPad Pro 12,9″) из-за режима экрана.
+  // на 9% (iPhone 11 Pro Max) и 34% (iPad Pro 12,9″) из-за режима экрана;
+  // на iPad Air 5 расчёт 5,19 против линейки 5,22 — совпал.
   var DEVICES = [
+    {name:'iPad Air (5-го пок.) 10,9″', ppmm:5.22, measured:true},   // рабочий iPad Кирилла — первым
+    {name:'iPhone 17 Pro', ppmm:4.83, measured:true},   // расчёт был 6,01 — режим экрана
     {name:'iPhone 11 Pro Max', ppmm:5.49, measured:true},
     {name:'iPad Pro 12,9″', ppmm:3.9, measured:true, approx:true},
     {name:'iPhone 15 / 16', ppmm:6.06},
     {name:'iPhone 15 Plus / 16 Plus', ppmm:6.03},
-    {name:'iPhone 17 Pro', ppmm:6.01},
     {name:'iPhone SE (2022)', ppmm:6.41},
     {name:'iPad (10-го пок.) / Air 11″', ppmm:5.19},
     {name:'iPad mini (6-го пок.)', ppmm:6.43},
