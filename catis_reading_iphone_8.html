@@ -161,11 +161,15 @@
        Ряды тянутся по остатку высоты (grid-auto-rows:1fr): строка показаний
        разрастается до семи строк, когда включены пробы и идёт контраст, и при
        фиксированной высоте кнопок нижние уезжали за край. Теперь столбик сам
-       подбирает высоту ряда; ниже 40 px не опускается — на iPad в альбомной
-       ориентации выходит около 50 px, прокрутки нет. */
-    .ctrls{display:grid; grid-template-columns:1fr 1fr; grid-auto-rows:1fr;
+       подбирает высоту ряда, и нижнего предела у ряда нет (minmax(0,1fr)):
+       столбик всегда влезает целиком, пусть и ужатым. Это важнее крупной
+       кнопки — срезанная кнопка контраста 22.09.2026 сделала пробу
+       недоступной. Парами идут не только режимы поля, но и Ж с V: пара
+       вместо двух рядов вернула запас. На реальном iPad ряд выходит около
+       50 px, ужиматься не приходится. */
+    .ctrls{display:grid; grid-template-columns:1fr 1fr; grid-auto-rows:minmax(0,1fr);
       gap:8px; margin-top:12px; flex:1 1 auto; min-height:0;}
-    .ic{width:auto; min-width:0; height:auto; min-height:40px;}
+    .ic{width:auto; min-width:0; height:auto; min-height:0;}
     .ic.wide{grid-column:1 / -1;}
   }
 </style>
@@ -214,7 +218,7 @@
     </div>
     <!-- Дата версии: менять при каждой публикации в catis-tools, чтобы на iPad
          было видно, какая версия загрузилась (ярлык кэширует старую) -->
-    <p id="version">CATIS-тест · ИКОНКИ · версия 22.09.2026</p>
+    <p id="version">CATIS-тест · ИКОНКИ · версия 22.09.2026-б</p>
   </div>
 </section>
 
@@ -252,8 +256,8 @@
       <button id="btnCream"  class="ic m-cream"     onclick="setMode('cream')"  aria-pressed="false" title="Кремовое поле" aria-label="Кремовое поле">Аа</button>
       <button id="btnBlue"   class="ic m-blue"      onclick="setMode('blue')"   aria-pressed="false" title="Голубое поле" aria-label="Голубое поле">Аа</button>
 
-      <button id="btnBold" class="ic i-bold wide" onclick="toggleBold()" aria-pressed="false" title="Жирный шрифт" aria-label="Жирный шрифт">Ж</button>
-      <button id="btnFont" class="ic i-font wide" onclick="toggleFont()" aria-pressed="false" title="Шрифт Verdana" aria-label="Шрифт Verdana">V</button>
+      <button id="btnBold" class="ic i-bold" onclick="toggleBold()" aria-pressed="false" title="Жирный шрифт" aria-label="Жирный шрифт">Ж</button>
+      <button id="btnFont" class="ic i-font" onclick="toggleFont()" aria-pressed="false" title="Шрифт Verdana" aria-label="Шрифт Verdana">V</button>
 
       <button id="btnLine" class="ic i-line wide s0" onclick="cycleLine()" aria-pressed="false" title="Межстрочный интервал: 1,05 / 1,3 / 1,6" aria-label="Межстрочный интервал">
         <span class="rows" aria-hidden="true"><i></i><i></i><i></i></span></button>
