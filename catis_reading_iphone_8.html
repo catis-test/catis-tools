@@ -64,10 +64,18 @@
     -webkit-user-select:none; user-select:none; overflow-wrap:normal;}
 
   .side{background:var(--chrome); border-top:1px solid var(--line); padding:8px 10px;}
+  /* Показания: только число миллиметров, максимально крупно. Строка «режим …»
+     убрана 22.09.2026 — её содержимое ушло в окно сводки по кнопке «=».
+     Процент контраста остаётся здесь: это тоже измерение, а не настройка. */
   .side .meta{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;
     font-size:12.5px; color:var(--muted); line-height:1.35;}
-  .side .meta b{color:var(--ink);}
-  #xhLabel{font-size:20px;}
+  .mmread{display:flex; align-items:baseline; gap:6px; flex-wrap:wrap;}
+  #xhLabel{font-size:44px; font-weight:800; color:var(--ink); line-height:1;}
+  .unit{font-size:17px;}
+  .creadout{display:flex; align-items:center; gap:7px; width:100%; margin-top:6px;}
+  .creadout[hidden]{display:none;}
+  .creadout b{font-size:28px; color:var(--ink); line-height:1;}
+  .creadout .half{width:21px; height:21px; box-shadow:0 0 0 1px #adb5bd;}
   .calib-btn{padding:8px 10px; line-height:0; color:var(--muted);}
 
   /* ---------- Кнопки-иконки ----------
@@ -143,10 +151,39 @@
   .i-letter.s1 .cols i + i{margin-left:7px;}
   .i-letter.s2 .cols i + i{margin-left:12px;}
 
+  /* Сводка настроек. Кнопка нарочно не цветная: это не настройка теста,
+     а справка о нём — другой род кнопки, и отличается она именно этим. */
+  .i-sheet{background:#e9ecef; border:3px solid #868e96; color:#10151d;
+    font-size:34px; font-weight:900;}
+
+  /* Окно сводки. Появляется только по нажатию — требование проекта
+     «всплывающих и самопроизвольно появляющихся элементов нет» соблюдено.
+     Внутри окна слова допустимы: его читают вблизи, а не под углом. */
+  .sheet{position:fixed; inset:0; z-index:10; padding:20px;
+    background:rgba(16,21,29,.6); display:flex; align-items:center; justify-content:center;}
+  .sheet[hidden]{display:none;}
+  .sheet-card{background:#fff; border-radius:18px; padding:22px 24px;
+    width:100%; max-width:520px; max-height:100%; overflow-y:auto;}
+  .sheet-card h2{margin:0 0 16px; font-size:20px; font-weight:600; color:var(--muted);}
+  .sheet-card dl{margin:0; display:grid; grid-template-columns:auto 1fr; gap:12px 16px; align-items:baseline;}
+  .sheet-card dt{font-size:19px; color:var(--muted);}
+  .sheet-card dd{margin:0; font-size:28px; font-weight:700; color:var(--ink); text-align:right;}
+  .sheet-close{width:100%; margin-top:22px; padding:16px; font-size:19px;
+    background:var(--accent); color:#fff; border-color:var(--accent); border-radius:12px;}
+
   /* Типоскоп: щель в тёмной шторке */
   .slit{display:block; width:36px; height:26px; border-radius:4px;
     background:linear-gradient(#0b0e12 0 35%, #ffd60a 35% 65%, #0b0e12 65% 100%);
     box-shadow:0 0 0 2px rgba(255,255,255,.9);}
+
+  /* Узкий экран (телефон): панель снизу и отнимает высоту у поля чтения,
+     поэтому показания ужимаются — число и процент в одну строку. */
+  @media (max-width:699px){
+    #xhLabel{font-size:34px;}
+    .mmread{align-items:center;}
+    .creadout{width:auto; margin:0 0 0 14px;}
+    .creadout b{font-size:24px;}
+  }
 
   /* Широкий экран (iPad): панель сбоку, поле чтения во всю высоту */
   @media (min-width:700px){
@@ -218,7 +255,7 @@
     </div>
     <!-- Дата версии: менять при каждой публикации в catis-tools, чтобы на iPad
          было видно, какая версия загрузилась (ярлык кэширует старую) -->
-    <p id="version">CATIS-тест · ИКОНКИ · версия 22.09.2026-б</p>
+    <p id="version">CATIS-тест · ИКОНКИ · версия 22.09.2026-в</p>
   </div>
 </section>
 
@@ -231,9 +268,11 @@
   </div>
   <div class="side">
     <div class="meta">
-      <div>
-        <b id="xhLabel">3,2 мм</b><br>
-        режим <b id="modeLabel">обычный</b>
+      <div class="mmread" aria-live="polite">
+        <b id="xhLabel">3,2</b><span class="unit">мм</span>
+        <div id="cReadout" class="creadout" hidden>
+          <span class="half" aria-hidden="true"></span><b id="cLabel">100%</b>
+        </div>
       </div>
       <button class="calib-btn" onclick="backCalib()" aria-label="Калибровка экрана" title="Калибровка">
         <svg viewBox="0 0 34 18" width="34" height="18" aria-hidden="true" focusable="false">
@@ -259,9 +298,9 @@
       <button id="btnBold" class="ic i-bold" onclick="toggleBold()" aria-pressed="false" title="Жирный шрифт" aria-label="Жирный шрифт">Ж</button>
       <button id="btnFont" class="ic i-font" onclick="toggleFont()" aria-pressed="false" title="Шрифт Verdana" aria-label="Шрифт Verdana">V</button>
 
-      <button id="btnLine" class="ic i-line wide s0" onclick="cycleLine()" aria-pressed="false" title="Межстрочный интервал: 1,05 / 1,3 / 1,6" aria-label="Межстрочный интервал">
+      <button id="btnLine" class="ic i-line s0" onclick="cycleLine()" aria-pressed="false" title="Межстрочный интервал: 1,05 / 1,3 / 1,6" aria-label="Межстрочный интервал">
         <span class="rows" aria-hidden="true"><i></i><i></i><i></i></span></button>
-      <button id="btnLetter" class="ic i-letter wide s0" onclick="cycleLetter()" aria-pressed="false" title="Межбуквенный интервал: 0 / +5% / +10%" aria-label="Межбуквенный интервал">
+      <button id="btnLetter" class="ic i-letter s0" onclick="cycleLetter()" aria-pressed="false" title="Межбуквенный интервал: 0 / +5% / +10%" aria-label="Межбуквенный интервал">
         <span class="cols" aria-hidden="true"><i></i><i></i><i></i></span></button>
 
       <button id="btnTypo" class="ic i-typo wide" onclick="toggleTypo()" aria-pressed="false" title="Типоскоп" aria-label="Типоскоп">
@@ -274,6 +313,21 @@
         <span class="half" aria-hidden="true"></span><span class="arr" aria-hidden="true">▲</span></button>
       <button id="btnCDown" class="ic cstep wide" onclick="stepContrast(1)" title="Контраст: бледнее" aria-label="Проба контраста: бледнее">
         <span class="half low" aria-hidden="true"></span><span class="arr" aria-hidden="true">▼</span></button>
+
+      <!-- Сводка: крупно и словами показывает, на чём остановились.
+           Заменяет убранную строку «режим …» в углу. -->
+      <button id="btnSheet" class="ic i-sheet wide" onclick="openSheet()" aria-haspopup="dialog"
+        title="Показать все текущие настройки" aria-label="Показать все текущие настройки">=</button>
+    </div>
+  </div>
+
+  <!-- Окно сводки. Открывается только по кнопке «=», закрывается кнопкой,
+       нажатием мимо окна и клавишей Esc; фокус возвращается на кнопку. -->
+  <div id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+    <div class="sheet-card">
+      <h2 id="sheetTitle">Сейчас на экране</h2>
+      <dl id="sheetList"></dl>
+      <button id="sheetClose" class="sheet-close" onclick="closeSheet()">Закрыть</button>
     </div>
   </div>
 </section>
@@ -532,10 +586,11 @@
     el.style.fontWeight = bold ? '700' : '400';
     el.textContent = s;
     document.querySelector('#test .field').style.background = f.bg;
-    document.getElementById('xhLabel').textContent = String(xMm).replace('.', ',') + ' мм'
-      + (cIdx ? ' · контраст ' + String(CONTRAST_STEPS[cIdx]).replace('.', ',') + '%' : '');
-    document.getElementById('modeLabel').textContent = MODE_NAME[mode] + (bold ? ' · жирный' : '') + (font==='verdana' ? ' · Verdana' : '')
-      + (lineIdx ? ' · строки ' + fmtRu(LINE_STEPS[lineIdx]) : '') + (letterIdx ? ' · буквы +' + Math.round(LETTER_STEPS[letterIdx]*100) + '%' : '');
+    document.getElementById('xhLabel').textContent = fmtRu(xMm);
+    // Процент контраста показывается только когда проба идёт
+    var cr = document.getElementById('cReadout');
+    cr.hidden = !cIdx;
+    if(cIdx) document.getElementById('cLabel').textContent = fmtRu(CONTRAST_STEPS[cIdx]) + '%';
     renderTypo(fontPx);
     // У каждой лестницы свои края: стрелка гаснет, когда дальше некуда.
     // Во время пробы контраста обе стрелки размера живые — любой из них
@@ -623,6 +678,53 @@
     mark('btnBold', bold);
     nextPhrase(); render();
   }
+
+  // ---------- Сводка настроек ----------
+  // Словами и крупно: окно читают вблизи. Показывает то же, что раньше
+  // висело строкой «режим …» в углу, плюс размер и ступень контраста.
+  function stateSummary(){
+    var rows = [['Размер', fmtRu(LADDER[idx][0]) + ' мм']];
+    if(cIdx) rows.push(['Контраст', fmtRu(CONTRAST_STEPS[cIdx]) + '%']);
+    rows.push(['Поле', MODE_NAME[mode]]);
+    rows.push(['Жирный', bold ? 'да' : 'нет']);
+    rows.push(['Шрифт', font === 'verdana' ? 'Verdana' : 'системный']);
+    rows.push(['Межстрочный', fmtRu(LINE_STEPS[lineIdx])]);
+    rows.push(['Межбуквенный', letterIdx ? '+' + Math.round(LETTER_STEPS[letterIdx]*100) + '%' : '0']);
+    rows.push(['Типоскоп', typo ? 'включён' : 'выключен']);
+    return rows;
+  }
+  var sheetEl = document.getElementById('sheet'), sheetReturn = null;
+  function openSheet(){
+    var list = document.getElementById('sheetList');
+    list.textContent = '';
+    stateSummary().forEach(function(r){
+      var dt = document.createElement('dt'); dt.textContent = r[0];
+      var dd = document.createElement('dd'); dd.textContent = r[1];
+      list.appendChild(dt); list.appendChild(dd);
+    });
+    sheetReturn = document.activeElement;
+    sheetEl.hidden = false;
+    document.getElementById('sheetClose').focus();
+  }
+  function closeSheet(){
+    if(sheetEl.hidden) return;
+    sheetEl.hidden = true;
+    // Фокус обязан уйти со скрытой кнопки, иначе клавиатура и экранный диктор
+    // упираются в тупик. Возвращаем откуда пришли, иначе — на кнопку «=».
+    var back = (sheetReturn && sheetReturn.focus && sheetReturn !== document.body)
+      ? sheetReturn : document.getElementById('btnSheet');
+    back.focus();
+    sheetReturn = null;
+  }
+  // Нажатие мимо окна — тоже закрытие
+  sheetEl.addEventListener('click', function(e){ if(e.target === sheetEl) closeSheet(); });
+  document.addEventListener('keydown', function(e){
+    if(sheetEl.hidden) return;
+    if(e.key === 'Escape'){ closeSheet(); return; }
+    // Пока окно открыто, Tab не должен уводить фокус на кнопки под ним:
+    // внутри окна фокусируемая кнопка одна, держим её.
+    if(e.key === 'Tab'){ e.preventDefault(); document.getElementById('sheetClose').focus(); }
+  });
 
   renderBar();
   loadCalib();
