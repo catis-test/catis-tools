@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Тренажёр">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="color-scheme" content="light only">
+<title>CATIS-тренажёр</title>
+<style>
+  /* CATIS-тренажёр: имитация интерфейса телефона для измерения времени
+     и ошибок при разных настройках. Описание и решения —
+     methodology/CATIS_trainer_spec.md. Этап 2: сквозной скелет на одном
+     домене «Переписка».
+     Экраны специалиста (калибровка, меню, сводка) — обычные доступные
+     страницы. Экран «телефона» (#phone) нарочно повторяет обычный
+     интерфейс со всеми его трудностями: требования доступности к нему
+     не применяются, иначе нечего измерять. */
+  :root{ --ink:#1b2330; --muted:#5b6574; --line:#cfd5dd; --accent:#245c59; --focus:#1d4ed8; --bad:#a3261b; --ok:#14683a; }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; background:#fff; color:var(--ink);}
+  body{
+    font-family:-apple-system,"Helvetica Neue",Arial,sans-serif; font-size:18px; line-height:1.4;
+    -webkit-text-size-adjust:100%;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  body.phone-on{overflow:hidden;}
+  .screen{display:none;}
+  .screen.active{display:block;}
+  .page{padding:10px 16px 48px; max-width:640px; margin:0 auto;}
+  h1{font-size:24px; margin:6px 0 4px;}
+  h2{font-size:20px; margin:22px 0 6px; padding-top:10px; border-top:2px solid var(--line);}
+  .sub{color:var(--muted); font-size:16px; margin:2px 0 8px;}
+  button, select, input{
+    font-family:inherit; font-size:18px; color:var(--ink); background:#fff;
+    border:2px solid var(--line); border-radius:12px; padding:10px 12px; min-height:48px;
+  }
+  button{cursor:pointer;}
+  button:active{background:#eef1f5;}
+  .primary{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .wide{width:100%; margin:6px 0;}
+  .row2{display:flex; gap:8px;} .row2 > *{flex:1;}
+  :focus-visible{outline:3px solid var(--focus); outline-offset:2px;}
+  label{display:block; font-size:16px; color:var(--muted); margin:10px 0 4px;}
+  .field-in{width:100%;}
+  .check{display:flex; align-items:center; gap:10px; margin:8px 0; color:var(--ink); font-size:18px;}
+  .check input{width:26px; height:26px; min-height:0;}
+  .mmgrid{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;}
+  .mmgrid label{margin:0 0 2px; font-size:14px;}
+  .mmgrid input{width:100%;}
+  .note{font-size:15px; color:var(--muted);}
+  .warn{color:var(--bad);}
+  .status{min-height:1.4em; font-size:16px; margin:4px 0;}
+  table.sum{border-collapse:collapse; width:100%; margin:8px 0; font-variant-numeric:tabular-nums;}
+  table.sum th, table.sum td{border-bottom:1px solid var(--line); text-align:left; padding:7px 4px; font-size:17px;}
+  table.sum td:last-child{text-align:right; font-weight:600;}
+  .codes{list-style:none; padding:0; margin:6px 0;}
+  .codes li{border:1px solid var(--line); border-radius:12px; padding:8px 10px; margin:6px 0;}
+  #version{color:var(--muted); font-size:14px; margin-top:24px;}
+
+  /* Калибровка — как в CATIS-тесте: полоса 50 мм по линейке. */
+  .barwrap{margin:14px 0 6px; position:relative; height:70px;}
+  .bar{position:absolute; left:0; top:22px; height:40px; background:#000;}
+  .bar-end{position:absolute; top:14px; width:2px; height:56px; background:#000;}
+  .barlabel{font-size:14px; color:var(--muted);}
+  input[type=range]{width:100%; height:40px; padding:0; border:0;}
+
+  /* ===== Имитация телефона ===== */
+  #phone{position:fixed; top:0; bottom:0; left:0; right:0; background:#000;}
+  /* На Маке при отладке — узкая колонка шириной с телефон. */
+  @media (min-width:640px){ #phone{left:50%; width:430px; margin-left:-215px;} }
+  #screen{
+    position:absolute; top:0; bottom:0; left:0; right:0; overflow:hidden;
+    display:flex; flex-direction:column;
+    background:var(--p-bg); color:var(--p-ink);
+    font-family:-apple-system,"Helvetica Neue",Arial,sans-serif;
+    touch-action:manipulation; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
+    --p-bg:#fff; --p-ink:#000; --p-sub:#6e6e73; --p-line:#d8d8dc; --p-acc:#007aff;
+    --p-in:#e9e9eb; --p-out:#007aff; --p-outink:#fff; --p-bar:#f7f7f7;
+    --p-kb:#d1d3d9; --p-key:#fff; --p-keyink:#000; --p-key2:#abb0ba;
+    --u:1; --fs:17px; --w-norm:400; --w-mid:600; --w-bold:700;
+  }
+  /* Тёмная тема — системная палитра, а не переворот цветов. */
+  #screen.dark{
+    --p-bg:#000; --p-ink:#fff; --p-sub:#98989f; --p-line:#38383a; --p-acc:#0a84ff;
+    --p-in:#26252a; --p-out:#0a84ff; --p-bar:#161618;
+    --p-kb:#2b2b2d; --p-key:#6b6b6e; --p-keyink:#fff; --p-key2:#464649;
+  }
+  /* Усиление контраста: серые подписи становятся цветом текста, линии темнее. */
+  #screen.hc{--p-sub:var(--p-ink); --p-line:#6e6e73; --p-acc:#0040dd; --p-in:#d1d1d6; --p-out:#0040dd;}
+  #screen.dark.hc{--p-acc:#409cff; --p-out:#0060d0; --p-in:#3a3a3c; --p-line:#8e8e93;}
+  /* Жирный шрифт, как Bold Text в iOS: каждое начертание на ступень тяжелее. */
+  #screen.bold{--w-norm:600; --w-mid:700; --w-bold:800;}
+  /* Крупный интерфейс (аналог «Увеличения дисплея»): растут значки, строки,
+     кнопки, клавиши. Текст не растёт — его размер специалист задаёт в мм
+     как итоговый, измеренный на телефоне пациента, иначе он учёлся бы дважды. */
+  #screen.big{--u:1.2;}
+  /* Инверсия цветов — фильтром на весь экран телефона, как «Смарт-инверсия». */
+  #screen.inv{filter:invert(1) hue-rotate(180deg);}
+
+  #strip{height:28px; flex:none; display:flex; justify-content:space-between; align-items:center;
+         padding:0 18px; font-size:15px; font-weight:600; background:var(--p-bg);}
+  #corner{padding:4px 18px 4px 0;}
+  #zoomWrap{flex:1; position:relative; overflow:hidden; min-height:0;}
+  #zoomLayer{position:absolute; top:0; left:0; width:100%; height:100%; transform-origin:0 0;
+             display:flex; flex-direction:column; background:var(--p-bg);}
+  #view{flex:1; min-height:0; display:flex; flex-direction:column; font-size:var(--fs); font-weight:var(--w-norm);}
+  #homebar{height:calc(var(--u)*24px); flex:none; display:flex; align-items:center; justify-content:center; background:var(--p-bg);}
+  #homebar span{width:134px; height:5px; border-radius:3px; background:var(--p-ink);}
+
+  /* Главный экран */
+  .home{flex:1; display:flex; flex-direction:column; background:linear-gradient(160deg,#3a6f9a,#6c4f8c);}
+  .grid{display:grid; grid-template-columns:repeat(4,1fr); gap:calc(var(--u)*18px) 6px; padding:calc(var(--u)*18px) 12px;}
+  .app{display:flex; flex-direction:column; align-items:center;}
+  .ico{width:calc(var(--u)*58px); height:calc(var(--u)*58px); border-radius:calc(var(--u)*14px);
+       display:flex; align-items:center; justify-content:center; font-size:calc(var(--u)*30px);}
+  .lbl{color:#fff; font-size:calc(var(--u)*12px); margin-top:5px; text-align:center; font-weight:var(--w-norm);}
+  .dock{margin-top:auto; margin:auto 10px 8px; padding:calc(var(--u)*12px) 8px; border-radius:28px;
+        background:rgba(255,255,255,.28); display:grid; grid-template-columns:repeat(4,1fr);}
+  .dock .lbl{display:none;}
+
+  /* Мессенджер */
+  .nav{flex:none; display:flex; align-items:center; min-height:calc(var(--u)*48px); padding:4px 12px;
+       border-bottom:1px solid var(--p-line); background:var(--p-bar); position:relative;}
+  .nav-big{font-size:calc(var(--fs)*1.6); font-weight:var(--w-bold); padding:6px 16px 8px;}
+  .back{color:var(--p-acc); font-size:var(--fs); padding:8px 10px 8px 0; white-space:nowrap;}
+  .nav-c{flex:1; text-align:center; font-weight:var(--w-mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .list{flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; touch-action:pan-y;}
+  .chat{display:flex; align-items:center; gap:10px; padding:calc(var(--u)*10px) 14px; border-bottom:1px solid var(--p-line);}
+  .ava{flex:none; width:calc(var(--u)*50px); height:calc(var(--u)*50px); border-radius:50%;
+       display:flex; align-items:center; justify-content:center; color:#fff; font-weight:var(--w-mid); font-size:calc(var(--u)*20px);}
+  .cb{flex:1; min-width:0;}
+  .c1{display:flex; justify-content:space-between; gap:8px; align-items:baseline;}
+  .nm{font-weight:var(--w-mid); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .tm{color:var(--p-sub); font-size:calc(var(--fs)*.82); flex:none;}
+  .pv{color:var(--p-sub); font-size:calc(var(--fs)*.92); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .badge{flex:none; min-width:calc(var(--fs)*1.3); height:calc(var(--fs)*1.3); border-radius:99px; background:var(--p-acc); color:#fff;
+         font-size:calc(var(--fs)*.8); display:flex; align-items:center; justify-content:center; padding:0 6px;}
+  .msgs{flex:1; overflow-y:auto; touch-action:pan-y; padding:10px 12px; display:flex; flex-direction:column; gap:6px;}
+  .bub{max-width:80%; padding:7px 12px; border-radius:18px; line-height:1.3; overflow-wrap:break-word;}
+  .bub.in{align-self:flex-start; background:var(--p-in); color:var(--p-ink);}
+  .bub.out{align-self:flex-end; background:var(--p-out); color:var(--p-outink);}
+  .comp{flex:none; display:flex; align-items:flex-end; gap:8px; padding:6px 10px; border-top:1px solid var(--p-line); background:var(--p-bar);}
+  .fld{flex:1; min-height:calc(var(--u)*38px); border:1px solid var(--p-line); border-radius:20px; padding:5px 14px;
+       background:var(--p-bg); display:flex; align-items:center; overflow-wrap:anywhere;}
+  .ph{color:var(--p-sub);}
+  .caret{display:inline-block; width:2px; height:1.1em; background:var(--p-acc); vertical-align:text-bottom; margin-left:1px;}
+  .send{flex:none; width:calc(var(--u)*38px); height:calc(var(--u)*38px); border-radius:50%; background:var(--p-acc); color:#fff;
+        display:flex; align-items:center; justify-content:center; font-size:calc(var(--u)*22px); font-weight:700;}
+  .send[hidden]{display:none;}
+  .empty{flex:1; display:flex; align-items:center; justify-content:center; color:var(--p-sub);}
+
+  /* Клавиатура тренажёра: своя, чтобы подчинялась настройкам и позволяла
+     считать неверные буквы. Надписи на клавишах от размера текста
+     не зависят — как в iOS; растут с «крупным интерфейсом». */
+  #kbd{flex:none; background:var(--p-kb); padding:6px 3px 4px;}
+  #kbd[hidden]{display:none;}
+  .kr{display:flex; justify-content:center; gap:5px; margin:0 0 calc(var(--u)*9px);}
+  .key{flex:1 1 0; max-width:40px; height:calc(var(--u)*44px); border-radius:6px; background:var(--p-key); color:var(--p-keyink);
+       display:flex; align-items:center; justify-content:center; font-size:calc(var(--u)*23px); font-weight:var(--w-norm);
+       box-shadow:0 1px 0 rgba(0,0,0,.3);}
+  .key.fn{background:var(--p-key2); max-width:none; flex:0 0 calc(var(--u)*46px); font-size:calc(var(--u)*20px);}
+  .key.space{max-width:none; flex:1; font-size:calc(var(--u)*16px);}
+  .key.down{filter:brightness(.8);}
+
+  /* Инструменты поверх экрана: пульт зума и кнопка озвучивания.
+     Они часть имитации, но касания по ним в ошибки не идут. */
+  /* Стоят на середине высоты: внизу они закрывали бы клавиши. */
+  .tool{position:absolute; z-index:5; width:52px; height:52px; border-radius:50%; border:0; padding:0; min-height:0;
+        background:rgba(40,40,40,.72); color:#fff; font-size:26px; display:flex; align-items:center; justify-content:center;
+        touch-action:none;}
+  .tool[hidden]{display:none;}
+  #zoomCtl{right:8px; top:38%;}
+  #zoomCtl.on{background:rgba(0,90,200,.85);}
+  #speakCtl{left:8px; top:38%;}
+
+  /* Диктовка — внутри имитации */
+  #dict{position:absolute; left:0; right:0; bottom:0; z-index:4; background:var(--p-kb); color:var(--p-ink);
+        padding:18px 16px calc(var(--u)*26px); text-align:center; font-size:22px;}
+  #dict[hidden]{display:none;}
+  .dbtn{display:inline-block; margin:14px 8px 0; padding:12px 26px; border-radius:22px; background:var(--p-key); font-size:20px;}
+
+  /* Слои специалиста поверх телефона: инструкция, «готово», скрытое меню.
+     Они вне #screen, поэтому на них не действуют инверсия и зум. */
+  .over{position:absolute; top:0; bottom:0; left:0; right:0; z-index:10; background:#fff; color:#111;
+        display:flex; flex-direction:column; justify-content:center; padding:24px 20px; text-align:center;}
+  .over[hidden]{display:none;}
+  .over .big{font-size:30px; line-height:1.3; font-weight:600; margin:0 0 26px;}
+  .over button{font-size:22px; min-height:64px; margin:8px 0;}
+  .over .hold{font-size:17px; min-height:52px; color:var(--muted); border-style:dashed;}
+</style>
+</head>
+<body>
+
+<!-- ============ Калибровка ============ -->
+<section id="calib" class="screen">
+  <div class="page">
+    <h1>Калибровка экрана</h1>
+    <p class="sub">Один раз на этом устройстве, как в CATIS-тесте. Без неё размеры в мм неверны.</p>
+    <p class="sub" id="calibNote"></p>
+    <p><b id="ppmm">5.49</b> px/мм</p>
+    <div class="row2">
+      <button onclick="nudge(-0.01)">− тоньше</button>
+      <button onclick="nudge(0.01)">＋ шире</button>
+    </div>
+    <input id="slider" type="range" min="3.5" max="7.0" step="0.01" value="5.49" aria-label="Коэффициент px/мм">
+    <label for="deviceSel">Устройство</label>
+    <select id="deviceSel" class="field-in" onchange="applyDevice()"><option value="">— выбрать —</option></select>
+    <label for="manualVal">Известное значение</label>
+    <div class="row2">
+      <input id="manualVal" type="text" inputmode="decimal" placeholder="напр. 4,83">
+      <button onclick="applyManual()">Применить</button>
+    </div>
+    <div class="barwrap">
+      <div class="barlabel">Эта полоса должна равняться 50 мм на линейке</div>
+      <div class="bar-end" style="left:0"></div>
+      <div id="bar" class="bar"></div>
+      <div id="barEnd" class="bar-end"></div>
+    </div>
+    <button class="primary wide" onclick="saveCalibAndGo()">Сохранить и продолжить</button>
+  </div>
+</section>
+
+<!-- ============ Меню специалиста ============ -->
+<section id="setup" class="screen">
+  <div class="page">
+    <h1>CATIS-тренажёр</h1>
+    <p class="sub" id="calibLine"></p>
+    <button class="wide" onclick="show('calib'); renderBar();">Калибровка</button>
+
+    <h2>Пациент и прогон</h2>
+    <label for="code">Код пациента</label>
+    <input id="code" class="field-in" type="text" placeholder="П-07" autocomplete="off" autocapitalize="characters">
+    <fieldset style="border:0; padding:0; margin:10px 0 0;">
+      <legend class="note">Режим</legend>
+      <label class="check"><input type="radio" name="mode" value="measure" checked> Измерительный</label>
+      <label class="check"><input type="radio" name="mode" value="train"> Тренировочный (в анализ не идёт)</label>
+    </fieldset>
+    <label for="variantSel">Задание «Переписка»: вариант</label>
+    <select id="variantSel" class="field-in"></select>
+
+    <h2>Набор настроек</h2>
+    <label for="profSel">Набор</label>
+    <select id="profSel" class="field-in" onchange="loadProfileForm()"></select>
+    <p class="note">Размер — высота строчной буквы в мм, как в CATIS-тесте; в каждом домене свой.</p>
+    <div class="mmgrid">
+      <div><label for="mmMsg">Переписка</label><input id="mmMsg" type="text" inputmode="decimal"></div>
+      <div><label for="mmWeb">Поиск</label><input id="mmWeb" type="text" inputmode="decimal"></div>
+      <div><label for="mmShop">Покупки</label><input id="mmShop" type="text" inputmode="decimal"></div>
+    </div>
+    <label class="check"><input type="checkbox" id="pBold"> Жирный шрифт</label>
+    <label class="check"><input type="checkbox" id="pInv"> Инверсия цветов</label>
+    <label class="check"><input type="checkbox" id="pDark"> Тёмная тема</label>
+    <label class="check"><input type="checkbox" id="pHc"> Усиление контраста</label>
+    <label class="check"><input type="checkbox" id="pBig"> Крупный интерфейс (Увеличение дисплея)</label>
+    <label class="check"><input type="checkbox" id="pSpeak"> Озвучивание экрана</label>
+    <label for="pZoom">Зум</label>
+    <div class="row2">
+      <select id="pZoom">
+        <option value="off">выключен</option>
+        <option value="gesture">жесты тремя пальцами</option>
+        <option value="button">кнопка-пульт на экране</option>
+      </select>
+      <select id="pZoomLvl" aria-label="Кратность зума">
+        <option value="1.5">×1,5</option><option value="2">×2</option><option value="3">×3</option>
+        <option value="4">×4</option><option value="5">×5</option>
+      </select>
+    </div>
+    <div class="row2" style="margin-top:8px;">
+      <button onclick="saveProfile(false)">Сохранить набор</button>
+      <button onclick="saveProfile(true)">Сохранить как новый</button>
+    </div>
+    <button class="wide" onclick="deleteProfile()">Удалить набор</button>
+    <p class="status" id="profStatus" role="status"></p>
+
+    <button class="primary wide" style="margin-top:16px; min-height:60px; font-size:21px;" onclick="startTask()">Начать задание</button>
+    <p class="status warn" id="startStatus" role="status"></p>
+
+    <h2>Результаты на этом телефоне</h2>
+    <p class="note">Хранятся только здесь. Выгружайте после каждого приёма: Safari может стереть память страницы.</p>
+    <ul class="codes" id="codes"></ul>
+    <p class="status" id="exportStatus" role="status"></p>
+    <button class="wide" onclick="clearExported()">Стереть выгруженные результаты</button>
+
+    <p id="version"></p>
+  </div>
+</section>
+
+<!-- ============ Сводка по заданию ============ -->
+<section id="summary" class="screen">
+  <div class="page">
+    <h1>Итог задания</h1>
+    <p class="sub" id="sumHead"></p>
+    <table class="sum" id="sumTable"></table>
+    <button class="primary wide" onclick="nextTask()">Следующее задание</button>
+    <button class="wide" onclick="toSetup()">В меню</button>
+  </div>
+</section>
+
+<!-- ============ Телефон ============ -->
+<section id="phone" class="screen" aria-label="Имитация телефона">
+  <div id="screen">
+    <div id="strip"><span id="corner" data-tool="corner">9:41</span><span aria-hidden="true">▂▄▆ ▭</span></div>
+    <div id="zoomWrap">
+      <div id="zoomLayer">
+        <div id="view"></div>
+        <div id="kbd" hidden></div>
+      </div>
+    </div>
+    <div id="homebar" data-act="home" data-wide><span></span></div>
+    <div id="dict" hidden>
+      <div>🎤 Говорите…</div>
+      <span class="dbtn" data-act="dict_cancel">Отмена</span><span class="dbtn" data-act="dict_done">Готово</span>
+    </div>
+    <button id="zoomCtl" class="tool" data-tool="zoom" hidden aria-label="Пульт зума">🔍</button>
+    <button id="speakCtl" class="tool" data-tool="speak" hidden aria-label="Озвучить экран">🔊</button>
+  </div>
+
+  <div id="instr" class="over" hidden>
+    <p class="big" id="instrText"></p>
+    <button onclick="speak(document.getElementById('instrText').textContent)">Прослушать</button>
+    <button class="primary" id="instrGo" onclick="beginTimer()">Начать</button>
+  </div>
+  <div id="done" class="over" hidden>
+    <p class="big">Готово! Передайте телефон специалисту.</p>
+    <button class="hold" id="doneHold">Для специалиста — удерживайте</button>
+  </div>
+  <div id="hmenu" class="over" hidden>
+    <p class="big">Меню специалиста</p>
+    <button onclick="closeHMenu()">Продолжить задание</button>
+    <button onclick="abortTask()">Прервать задание</button>
+  </div>
+</section>
+
+<script>
+  var VERSION = '24.09.2026';
+  // Память браузера. У htmlpreview.github.io она общая с CATIS-тестом,
+  // поэтому ключи тренажёра свои. Калибровку теста только читаем.
+  var STORE_KEY = 'catis_trainer_v1';
+  var CALIB_KEY = 'catis_trainer_calib';
+  var TEST_CALIB_KEY = 'catis_calib';
+  var SYS_FONT = '-apple-system,"Helvetica Neue",Arial,sans-serif';
+
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function num(s){ var v = parseFloat(String(s).replace(',', '.')); return isNaN(v) ? null : v; }
+  function r1(v){ return Math.round(v*10)/10; }
+  function comma(v){ return String(v).replace('.', ','); }
+  function show(id){
+    document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('active'); });
+    $(id).classList.add('active');
+    document.body.classList.toggle('phone-on', id === 'phone');
+    window.scrollTo(0, 0);
+  }
+
+  // ---------- Калибровка (приём из CATIS-теста) ----------
+  // Список устройств — копия из tools/catis_reading_test_icons.html;
+  // новое измерение вносить в оба файла.
+  var DEVICES = [
+    {name:'iPad Air (5-го пок.) 10,9″', ppmm:5.22, measured:true},
+    {name:'iPhone 17 Pro', ppmm:4.83, measured:true},
+    {name:'MacBook Air 13″ (2019), Chrome', ppmm:4.46, measured:true},
+    {name:'iPhone 11 Pro Max', ppmm:5.49, measured:true},
+    {name:'iPad Pro 12,9″', ppmm:3.9, measured:true, approx:true},
+    {name:'iPhone 15 / 16', ppmm:6.06},
+    {name:'iPhone 15 Plus / 16 Plus', ppmm:6.03},
+    {name:'iPhone SE (2022)', ppmm:6.41},
+    {name:'Samsung Galaxy S23 / S24', ppmm:5.54},
+    {name:'Samsung Galaxy A54 / A55', ppmm:6.05},
+    {name:'Google Pixel 8', ppmm:6.38},
+    {name:'Xiaomi Redmi Note 13', ppmm:5.65}
+  ];
+  var TARGET_MM = 50, pxPerMm = 5.49, calibDevice = '', calibSource = '';
+  function renderBar(){
+    var w = pxPerMm * TARGET_MM;
+    $('bar').style.width = w+'px'; $('barEnd').style.left = w+'px';
+    $('ppmm').textContent = pxPerMm.toFixed(2);
+  }
+  function setPPMM(v){
+    if(v === null || isNaN(v)) return;
+    pxPerMm = Math.min(7.0, Math.max(3.5, v));
+    $('slider').value = pxPerMm.toFixed(2); renderBar();
+  }
+  function nudge(d){ setPPMM(pxPerMm + d); calibDevice = ''; }
+  function applyManual(){ setPPMM(num($('manualVal').value)); calibDevice = ''; }
+  $('slider').addEventListener('input', function(){ setPPMM(parseFloat(this.value)); calibDevice = ''; });
+  (function(){
+    var gm = document.createElement('optgroup'), gc = document.createElement('optgroup');
+    gm.label = 'Измерено линейкой'; gc.label = 'Расчётно — проверить линейкой';
+    DEVICES.forEach(function(d, i){
+      var o = document.createElement('option'); o.value = i;
+      o.textContent = d.name+' — '+comma(d.ppmm.toFixed(2))+(d.approx ? ' (приблизительно)' : '');
+      (d.measured ? gm : gc).appendChild(o);
+    });
+    $('deviceSel').appendChild(gm); $('deviceSel').appendChild(gc);
+  })();
+  function applyDevice(){
+    var d = DEVICES[$('deviceSel').value]; if(!d) return;
+    setPPMM(d.ppmm); calibDevice = d.name;
+    $('calibNote').textContent = d.name+': '+(d.measured ? 'измеренное' : 'расчётное')+' значение — проверьте линейкой.';
+  }
+  function loadCalib(){
+    // Сначала своя калибровка; если её нет — калибровка CATIS-теста
+    // с этого же устройства (тот же адрес раздачи, та же память).
+    var keys = [[CALIB_KEY, 'тренажёра'], [TEST_CALIB_KEY, 'CATIS-теста']];
+    for(var i=0; i<keys.length; i++){
+      try{
+        var c = JSON.parse(localStorage.getItem(keys[i][0]) || 'null');
+        if(c && num(c.ppmm) !== null){
+          setPPMM(num(c.ppmm)); calibDevice = c.device || ''; calibSource = keys[i][1]+(c.date ? ' от '+c.date : '');
+          return true;
+        }
+      }catch(e){}
+    }
+    return false;
+  }
+  function saveCalibAndGo(){
+    try{ localStorage.setItem(CALIB_KEY, JSON.stringify({ppmm:pxPerMm, device:calibDevice, date:new Date().toISOString().slice(0,10)})); }catch(e){}
+    calibSource = 'тренажёра, сейчас';
+    toSetup();
+  }
+
+  // Доля высоты строчной буквы в кегле — меряется, как в CATIS-тесте, по «н».
+  var xRatio = null;
+  function xRatioSys(){
+    if(xRatio) return xRatio;
+    var r = 0.52;
+    try{
+      var c = document.createElement('canvas').getContext('2d');
+      c.font = '200px '+SYS_FONT; c.textBaseline = 'alphabetic';
+      var m = c.measureText('н');
+      var xh = (m.actualBoundingBoxAscent||0)+(m.actualBoundingBoxDescent||0);
+      if(xh > 0) r = xh/200;
+    }catch(e){}
+    return (xRatio = r);
+  }
+  function mmToPx(mm){ return mm * pxPerMm / xRatioSys(); }
+
+  // ---------- Хранилище ----------
+  // {profiles:[…], tasks:[…]}. Задание — одна строка будущей таблицы.
+  var DEFAULT_PROFILE = {
+    id:'factory', name:'Заводские (примерно)', fixed:true,
+    // ≈17 pt основного текста iOS на iPhone 17 Pro; уточнить линейкой на телефоне клиники.
+    mm:{msg:1.8, web:1.8, shop:1.8},
+    bold:false, inv:false, dark:false, hc:false, big:false, speak:false, zoom:'off', zoomLvl:2
+  };
+  var store = {profiles:[], tasks:[]};
+  function loadStore(){
+    try{ var s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); if(s && s.tasks) store = s; }catch(e){}
+    if(!store.profiles.some(function(p){ return p.id === 'factory'; })) store.profiles.unshift(JSON.parse(JSON.stringify(DEFAULT_PROFILE)));
+  }
+  function saveStore(){
+    try{ localStorage.setItem(STORE_KEY, JSON.stringify(store)); return true; }
+    catch(e){ alert('Память браузера не записалась ('+e.name+'). Выгрузите результаты сейчас.'); return false; }
+  }
+  function newId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2, 6); }
+
+  // ---------- Наборы настроек ----------
+  function currentProfile(){
+    var id = $('profSel').value;
+    return store.profiles.filter(function(p){ return p.id === id; })[0] || store.profiles[0];
+  }
+  function renderProfiles(selId){
+    var sel = $('profSel'); sel.innerHTML = '';
+    store.profiles.forEach(function(p){
+      var o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o);
+    });
+    if(selId) sel.value = selId;
+    loadProfileForm();
+  }
+  function loadProfileForm(){
+    var p = currentProfile();
+    $('mmMsg').value = comma(p.mm.msg); $('mmWeb').value = comma(p.mm.web); $('mmShop').value = comma(p.mm.shop);
+    $('pBold').checked = p.bold; $('pInv').checked = p.inv; $('pDark').checked = p.dark;
+    $('pHc').checked = p.hc; $('pBig').checked = p.big; $('pSpeak').checked = p.speak;
+    $('pZoom').value = p.zoom; $('pZoomLvl').value = String(p.zoomLvl);
+    $('profStatus').textContent = '';
+  }
+  function formProfile(){
+    return {
+      mm:{msg:num($('mmMsg').value), web:num($('mmWeb').value), shop:num($('mmShop').value)},
+      bold:$('pBold').checked, inv:$('pInv').checked, dark:$('pDark').checked, hc:$('pHc').checked,
+      big:$('pBig').checked, speak:$('pSpeak').checked, zoom:$('pZoom').value, zoomLvl:num($('pZoomLvl').value)
+    };
+  }
+  function validMm(p){
+    return ['msg','web','shop'].every(function(k){ return p.mm[k] !== null && p.mm[k] >= 0.5 && p.mm[k] <= 15; });
+  }
+  function saveProfile(asNew){
+    var f = formProfile(), cur = currentProfile();
+    if(!validMm(f)){ $('profStatus').textContent = 'Размеры — числа от 0,5 до 15 мм.'; return; }
+    if(asNew || cur.fixed){
+      var name = prompt(cur.fixed && !asNew ? 'Заводской набор не меняется. Имя нового набора:' : 'Имя нового набора:', '');
+      if(!name) return;
+      f.id = newId(); f.name = name.trim(); store.profiles.push(f);
+      saveStore(); renderProfiles(f.id); $('profStatus').textContent = 'Набор «'+f.name+'» сохранён.';
+    } else {
+      f.id = cur.id; f.name = cur.name;
+      store.profiles[store.profiles.indexOf(cur)] = f;
+      saveStore(); renderProfiles(f.id); $('profStatus').textContent = 'Изменения сохранены.';
+    }
+  }
+  function deleteProfile(){
+    var cur = currentProfile();
+    if(cur.fixed){ $('profStatus').textContent = 'Заводской набор не удаляется.'; return; }
+    if(!confirm('Удалить набор «'+cur.name+'»? Результаты заданий, пройденных с ним, сохранятся.')) return;
+    store.profiles.splice(store.profiles.indexOf(cur), 1); saveStore(); renderProfiles('factory');
+  }
+
+  // ---------- Задания домена «Переписка» ----------
+  // Черновые варианты (этап 2). Ответ у всех одинаковый, чтобы варианты
+  // различались только именем и местом нужного чата в списке. Полный
+  // запас вариантов — по паспорту текстов после этапа 2.
+  var AVA = ['#e0803a','#4a8fd6','#57a55a','#b05fc4','#d1587a','#3aa3a0','#8a7b5c'];
+  var MSG_VARIANTS = [
+    {n:1, target:'marina', who:'Марины', reply:'хорошо', chats:[
+      {id:'sergey', name:'Сергей', time:'9:12', h:[['out','Во сколько завтра?'],['in','Созвонимся вечером']]},
+      {id:'marina', name:'Марина', time:'10:24', unread:1, h:[['in','Привет!'],['in','Придёшь завтра к обеду?']]},
+      {id:'dom', name:'Дом, 2 подъезд', time:'Вчера', unread:3, h:[['in','Воду отключат в четверг']]},
+      {id:'olga', name:'Ольга Петровна', time:'Вчера', h:[['out','Отправил вам документы'],['in','Спасибо, получила']]},
+      {id:'library', name:'Библиотека', time:'Пн', h:[['in','Напоминаем вернуть книгу']]},
+      {id:'ivan', name:'Иван', time:'Вс', h:[['in','Фото с дачи']]}
+    ]},
+    {n:2, target:'nikolay', who:'Николая', reply:'хорошо', chats:[
+      {id:'tanya', name:'Таня', time:'8:47', unread:2, h:[['in','Мама, позвоню после работы']]},
+      {id:'dom', name:'Дом, 2 подъезд', time:'8:05', h:[['in','Лифт починили']]},
+      {id:'pickup', name:'Пункт выдачи', time:'Вчера', h:[['in','Ваш заказ готов к выдаче']]},
+      {id:'nikolay', name:'Николай', time:'Вчера', unread:1, h:[['in','Заеду в субботу в 10, удобно?']]},
+      {id:'lena', name:'Лена', time:'Пт', h:[['out','С днём рождения!'],['in','Спасибо большое!']]},
+      {id:'garage', name:'Гаражный кооператив', time:'Чт', h:[['in','Собрание в воскресенье']]}
+    ]},
+    {n:3, target:'vera', who:'Веры', reply:'хорошо', chats:[
+      {id:'pavel', name:'Павел', time:'11:03', h:[['in','Посмотри погоду на выходные']]},
+      {id:'library', name:'Библиотека', time:'10:40', unread:1, h:[['in','Ваша книга пришла']]},
+      {id:'vera', name:'Вера', time:'9:55', unread:1, h:[['in','Доброе утро!'],['in','Купить тебе хлеба?']]},
+      {id:'grand', name:'Внуки', time:'Вчера', unread:5, h:[['in','Бабушка, смотри!']]},
+      {id:'galina', name:'Галина', time:'Ср', h:[['out','Рецепт пирога пришлю'],['in','Жду!']]},
+      {id:'sosed', name:'Сосед Михаил', time:'Вт', h:[['in','Ключи у меня']]}
+    ]}
+  ];
+  // Главный экран одинаков во всех вариантах, как у настоящего телефона.
+  var HOME_APPS = [
+    ['cal','Календарь','#fff','📅'], ['photo','Фото','#fff','🖼️'], ['cam','Камера','#8e8e93','📷'], ['mail','Почта','#1e7cf2','✉️'],
+    ['clock','Часы','#111','⏰'], ['weather','Погода','#3d8ee6','⛅'], ['maps','Карты','#5cb85c','🗺️'], ['notes','Заметки','#f5c542','📝'],
+    ['shop','Магазин','#f28c28','🛒'], ['msg','Мессенджер','#2e8bd8','💬'], ['music','Музыка','#e94560','🎵'], ['settings','Настройки','#8e8e93','⚙️']
+  ];
+  var DOCK_APPS = [['phone','Телефон','#34c759','📞'], ['web','Браузер','#1e7cf2','🌐'], ['sms','СМС','#34c759','✉️'], ['camera2','Камера','#555','📸']];
+
+  // ---------- Состояние прогона ----------
+  var session = null;   // {id, code, mode, profile}
+  var task = null;      // текущее задание (запись в store.tasks)
+  var S = null;         // состояние имитации
+  var running = false, t0 = 0;
+
+  function variantUse(code){
+    // Сколько раз каждый вариант уже был у этого пациента — для авто-выбора.
+    var use = MSG_VARIANTS.map(function(){ return 0; });
+    store.tasks.forEach(function(t){ if(t.code === code && t.domain === 'msg') use[t.variant-1]++; });
+    return use;
+  }
+  function autoVariant(code){
+    var use = variantUse(code), best = 0;
+    for(var i=1; i<use.length; i++) if(use[i] < use[best]) best = i;
+    return best+1;
+  }
+  function renderVariantSel(){
+    var sel = $('variantSel'), keep = sel.value; sel.innerHTML = '';
+    var o = document.createElement('option'); o.value = 'auto'; o.textContent = 'авто — наименее использованный у пациента'; sel.appendChild(o);
+    MSG_VARIANTS.forEach(function(v){
+      var o2 = document.createElement('option'); o2.value = v.n; o2.textContent = 'вариант '+v.n+' — ответить '+v.who; sel.appendChild(o2);
+    });
+    sel.value = keep || 'auto';
+  }
+
+  function startTask(){
+    var code = $('code').value.trim().toUpperCase().replace(/^P-/, 'П-');
+    if(!code){ $('startStatus').textContent = 'Введите код пациента.'; $('code').focus(); return; }
+    var f = formProfile();
+    if(!validMm(f)){ $('startStatus').textContent = 'Проверьте размеры в мм.'; return; }
+    var cur = currentProfile();
+    // В прогон идёт снимок настроек с формы; если форму меняли без сохранения —
+    // это отражено в имени набора.
+    var changed = ['mm','bold','inv','dark','hc','big','speak','zoom','zoomLvl'].some(function(k){ return JSON.stringify(f[k]) !== JSON.stringify(cur[k]); });
+    f.name = cur.name + (changed ? ' (изменён без сохранения)' : '');
+    $('code').value = code; $('startStatus').textContent = '';
+    session = {id:newId(), code:code, mode:document.querySelector('input[name=mode]:checked').value, profile:f};
+    var v = $('variantSel').value;
+    launch(v === 'auto' ? autoVariant(code) : parseInt(v, 10));
+  }
+  function nextTask(){ if(session) launch(autoVariant(session.code)); }
+
+  function launch(vn){
+    var p = session.profile, V = MSG_VARIANTS[vn-1];
+    task = {
+      id:newId(), session:session.id, code:session.code, mode:session.mode,
+      date:new Date().toISOString(), version:VERSION,
+      device:calibDevice, ppmm:r1(pxPerMm*100)/100, ua:navigator.userAgent,
+      profile:p, domain:'msg', task:'reply', variant:vn,
+      outcome:'', time_s:null, taps:0, hits:0, miss:0, wrong:0, back:0, chars:0,
+      dsum:0, aimN:0, zoomOn:0, zoomPan:0, speakUses:0, dictated:false, text:'', exported:false, events:[]
+    };
+    S = {V:V, screen:'home', chat:null, text:{}, sent:{}, kbd:false, lat:false};
+    applyProfile(p);
+    renderView();
+    $('instrText').textContent = 'Откройте сообщение от '+V.who+' и ответьте: «'+V.reply+'».';
+    $('instr').hidden = false; $('done').hidden = true; $('hmenu').hidden = true;
+    running = false;
+    show('phone');
+    $('instrGo').focus();
+  }
+  function beginTimer(){
+    $('instr').hidden = true;
+    if('speechSynthesis' in window) speechSynthesis.cancel();
+    t0 = performance.now(); pauseT = 0; running = true;
+  }
+  function elapsed(){ return Math.round((pauseT || performance.now()) - t0); }
+  // Пауза: пока открыто меню специалиста или телефон свёрнут (звонок,
+  // блокировка), время задания стоит. Сдвигаем точку отсчёта на длину
+  // паузы; сам факт паузы остаётся в журнале.
+  var pauseT = 0;
+  function pause(why){ if(running && !pauseT){ log({type:'pause', why:why}); pauseT = performance.now(); } }
+  function resume(){ if(pauseT){ t0 += performance.now() - pauseT; pauseT = 0; log({type:'resume'}); } }
+  document.addEventListener('visibilitychange', function(){ if(document.hidden) pause('свёрнут'); else if($('hmenu').hidden) resume(); });
+  function log(ev){ ev.t = elapsed(); task.events.push(ev); }
+
+  function finishTask(outcome){
+    running = false;
+    task.outcome = outcome;
+    task.time_s = Math.round(elapsed()/10)/100;
+    task.dmean = task.aimN ? r1(task.dsum/task.aimN) : null;
+    task.hitShare = task.taps ? Math.round(task.hits/task.taps*100)/100 : null;
+    delete task.dsum; delete task.aimN;
+    store.tasks.push(task); saveStore();
+    Z.on = false; applyZoom();
+  }
+  function abortTask(){
+    $('hmenu').hidden = true;
+    resume();
+    if(task && !task.outcome){ log({type:'abort'}); finishTask('прервано'); }
+    openSummary();
+  }
+  function closeHMenu(){ $('hmenu').hidden = true; resume(); }
+
+  // ---------- Применение настроек к «телефону» ----------
+  function applyProfile(p){
+    var sc = $('screen');
+    sc.classList.toggle('bold', p.bold); sc.classList.toggle('inv', p.inv);
+    sc.classList.toggle('dark', p.dark); sc.classList.toggle('hc', p.hc); sc.classList.toggle('big', p.big);
+    $('zoomCtl').hidden = p.zoom !== 'button';
+    $('speakCtl').hidden = !p.speak;
+    Z.level = p.zoomLvl || 2; Z.on = false; applyZoom();
+  }
+  function domainMm(dom){ return session.profile.mm[dom]; }
+
+  // ---------- Отрисовка экранов имитации ----------
+  function icon(a){
+    return '<div class="app" data-act="app:'+a[0]+'"><div class="ico" style="background:'+a[2]+'">'+a[3]+'</div><div class="lbl">'+a[1]+'</div></div>';
+  }
+  function renderView(){
+    var v = $('view'), h = '';
+    var inMsg = S.screen === 'chats' || S.screen.indexOf('chat:') === 0;
+    v.style.setProperty('--fs', (inMsg ? mmToPx(domainMm('msg')) : 17)+'px');
+    if(S.screen === 'home'){
+      h = '<div class="home"><div class="grid">'+HOME_APPS.map(icon).join('')+'</div><div class="dock">'+DOCK_APPS.map(icon).join('')+'</div></div>';
+    } else if(S.screen === 'chats'){
+      h = '<div class="nav nav-big">Чаты</div><div class="list">'+S.V.chats.map(function(c, i){
+        var last = (S.sent[c.id] || c.h[c.h.length-1][1]);
+        return '<div class="chat" data-act="chat:'+c.id+'" data-wide><div class="ava" style="background:'+AVA[i % AVA.length]+'">'+esc(c.name.charAt(0))+'</div>'+
+               '<div class="cb"><div class="c1"><span class="nm">'+esc(c.name)+'</span><span class="tm">'+c.time+'</span></div>'+
+               '<div class="pv">'+esc(last)+'</div></div>'+(c.unread && !S.sent[c.id] ? '<span class="badge">'+c.unread+'</span>' : '')+'</div>';
+      }).join('')+'</div>';
+    } else if(S.screen.indexOf('chat:') === 0){
+      var c = S.V.chats.filter(function(x){ return x.id === S.chat; })[0];
+      var hist = c.h.slice(); if(S.sent[c.id]) hist.push(['out', S.sent[c.id]]);
+      h = '<div class="nav"><span class="back" data-act="back">‹ Чаты</span><span class="nav-c">'+esc(c.name)+'</span></div>'+
+          '<div class="msgs" id="msgs">'+hist.map(function(m){ return '<div class="bub '+m[0]+'">'+esc(m[1])+'</div>'; }).join('')+'</div>'+
+          '<div class="comp"><div class="fld" data-act="field" id="fld" data-wide></div><div class="send" data-act="send" id="sendBtn" hidden>↑</div></div>';
+    } else {
+      var a = HOME_APPS.concat(DOCK_APPS).filter(function(x){ return 'app:'+x[0] === S.screen; })[0];
+      h = '<div class="nav nav-big">'+esc(a ? a[1] : '')+'</div><div class="empty"></div>';
+    }
+    v.innerHTML = h;
+    $('kbd').hidden = !S.kbd;
+    if(S.kbd) renderKbd();
+    if(S.chat && S.screen.indexOf('chat:') === 0){ renderComposer(); var m = $('msgs'); m.scrollTop = m.scrollHeight; }
+  }
+  function renderComposer(){
+    var t = S.text[S.chat] || '';
+    $('fld').innerHTML = t ? esc(t)+(S.kbd ? '<span class="caret"></span>' : '') : (S.kbd ? '<span class="caret"></span>' : '')+'<span class="ph">Сообщение</span>';
+    $('sendBtn').hidden = !t;
+  }
+  var KB_RU = ['йцукенгшщзх', 'фывапролджэ', 'ячсмитьбю'];
+  var KB_EN = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+  function renderKbd(){
+    var rows = S.lat ? KB_EN : KB_RU, h = '';
+    rows.forEach(function(r, i){
+      h += '<div class="kr">'+r.split('').map(function(ch){ return '<div class="key" data-act="k:'+ch+'">'+ch+'</div>'; }).join('')+
+           (i === 2 ? '<div class="key fn" data-act="bs">⌫</div>' : '')+'</div>';
+    });
+    h += '<div class="kr"><div class="key fn" data-act="lang">🌐</div><div class="key space" data-act="k: ">'+(S.lat ? 'space' : 'пробел')+'</div><div class="key fn" data-act="mic">🎤</div></div>';
+    $('kbd').innerHTML = h;
+  }
+  function go(scr){
+    S.screen = scr;
+    S.chat = scr.indexOf('chat:') === 0 ? scr.slice(5) : null;
+    if(!S.chat) S.kbd = false;
+    renderView();
+  }
+
+  // ---------- Логика задания: что считается ошибкой ----------
+  // Путь к цели: главный экран → Мессенджер → нужный чат → поле → текст → отправить.
+  // Задание построено так, что «назад» и «домой» по пути не нужны,
+  // поэтому любое из них — лишний возврат после захода не туда.
+  function doAct(act){
+    var V = S.V, cls = 'ok';
+    if(act === 'home'){ cls = 'back'; go('home'); }
+    else if(act === 'back'){ cls = 'back'; go('chats'); }
+    else if(act.indexOf('app:') === 0){
+      if(act === 'app:msg'){ go('chats'); } else { cls = 'wrong'; go(act); }
+    }
+    else if(act.indexOf('chat:') === 0){ if(act.slice(5) !== V.target) cls = 'wrong'; go(act); }
+    else if(act === 'field'){ S.kbd = true; renderView(); }
+    else if(act.indexOf('k:') === 0){ cls = typeChar(act.slice(2)); }
+    else if(act === 'bs'){ var t = S.text[S.chat] || ''; S.text[S.chat] = t.slice(0, -1); renderComposer(); }
+    else if(act === 'lang'){ S.lat = !S.lat; renderKbd(); }
+    else if(act === 'mic'){ $('dict').hidden = false; }
+    else if(act === 'dict_cancel'){ $('dict').hidden = true; }
+    else if(act === 'dict_done'){
+      // Речь не записывается: подставляется нужный ответ, отметка «диктовкой».
+      $('dict').hidden = true; task.dictated = true;
+      S.text[S.chat] = cap(V.reply); renderComposer(); log({type:'dictate'});
+    }
+    else if(act === 'send'){
+      var txt = S.text[S.chat] || '';
+      if(txt){
+        // Любая отправка в нужный чат — цель (опечатки уже посчитаны);
+        // отправка в чужой чат — «не тот элемент», задание продолжается.
+        S.sent[S.chat] = txt; S.text[S.chat] = '';
+        if(S.chat === V.target){ task.text = txt; cls = 'goal'; } else cls = 'wrong';
+        S.kbd = false; renderView();
+      }
+    }
+    return cls;
+  }
+  function cap(s){ return s.charAt(0).toUpperCase()+s.slice(1); }
+  // Неверный символ считается только в нужном чате: сравнение с ответом
+  // по позиции, без учёта регистра. Удалённый потом — всё равно ошибка.
+  // В чужом чате ошибка уже засчитана при входе в него.
+  function typeChar(ch){
+    var t = S.text[S.chat] || '', cls = 'ok';
+    if(S.chat === S.V.target){
+      var exp = S.V.reply.charAt(t.length);
+      if(!exp || exp.toLowerCase() !== ch.toLowerCase()) cls = 'char';
+    }
+    t += ch; if(t.length === 1) t = t.toUpperCase();   // заглавная в начале, как в iOS
+    S.text[S.chat] = t; renderComposer();
+    return cls;
+  }
+
+  // ---------- Касания: своя обработка, чтобы всё записывать ----------
+  // Касание = один палец, без сдвига больше 10 px, короче 0,8 с.
+  // Касания двумя и более пальцами — жесты, в касания не идут.
+  var ptrs = {}, nPtr = 0, multi = false;
+  var screenEl = $('screen');
+  screenEl.addEventListener('pointerdown', function(e){
+    if(!running || e.target.closest('[data-tool]')) return;
+    nPtr++; if(nPtr > 1) multi = true;
+    ptrs[e.pointerId] = {x:e.clientX, y:e.clientY, t:performance.now(), target:e.target, moved:false};
+  });
+  screenEl.addEventListener('pointermove', function(e){
+    var p = ptrs[e.pointerId];
+    if(p && Math.hypot(e.clientX-p.x, e.clientY-p.y) > 10) p.moved = true;
+  });
+  function ptrEnd(e, isTap){
+    var p = ptrs[e.pointerId]; if(!p) return;
+    delete ptrs[e.pointerId]; nPtr = Math.max(0, nPtr-1);
+    if(isTap && running && !multi && !p.moved && performance.now()-p.t < 800) handleTap(p);
+    if(nPtr === 0) multi = false;
+  }
+  screenEl.addEventListener('pointerup', function(e){ ptrEnd(e, true); });
+  screenEl.addEventListener('pointercancel', function(e){ ptrEnd(e, false); });
+
+  function handleTap(p){
+    var sr = screenEl.getBoundingClientRect();
+    var ev = {type:'tap', x:r1((p.x-sr.left)/pxPerMm), y:r1((p.y-sr.top)/pxPerMm)};
+    var el = p.target.closest('[data-act]');
+    task.taps++;
+    if(!el || !screenEl.contains(el)){
+      ev.cls = 'miss'; task.miss++;
+    } else {
+      // Расстояние до центра элемента — в мм на стекле: прямоугольник
+      // берётся уже с учётом зума. В среднее идут только компактные цели
+      // (клавиши, значки, кнопки): у строки чата на всю ширину или поля
+      // ввода расстояние до центра ничего не говорит о точности.
+      var r = el.getBoundingClientRect();
+      var d = Math.hypot(p.x-(r.left+r.width/2), p.y-(r.top+r.height/2))/pxPerMm;
+      task.hits++;
+      if(!el.hasAttribute('data-wide')){ task.dsum += d; task.aimN++; }
+      ev.act = el.getAttribute('data-act'); ev.d = r1(d);
+      if(el.classList.contains('key')){ el.classList.add('down'); setTimeout(function(){ el.classList.remove('down'); }, 90); }
+      ev.cls = doAct(ev.act);
+      if(ev.cls === 'wrong') task.wrong++;
+      else if(ev.cls === 'back') task.back++;
+      else if(ev.cls === 'char') task.chars++;
+    }
+    task.events.push(Object.assign({t:elapsed()}, ev));
+    if(ev.cls === 'goal'){ finishTask('выполнено'); $('done').hidden = false; $('doneHold').focus(); }
+  }
+
+  // ---------- Зум ----------
+  // Весь экран под пальцами увеличивается преобразованием слоя; попадания
+  // считаются браузером с учётом преобразования.
+  var Z = {on:false, level:2, tx:0, ty:0};
+  var zoomWrap = $('zoomWrap'), zoomLayer = $('zoomLayer');
+  function applyZoom(){
+    var z = Z.on ? Z.level : 1;
+    if(!Z.on){ Z.tx = 0; Z.ty = 0; }
+    var w = zoomWrap.clientWidth, h = zoomWrap.clientHeight;
+    Z.tx = Math.min(0, Math.max(w - w*z, Z.tx));
+    Z.ty = Math.min(0, Math.max(h - h*z, Z.ty));
+    zoomLayer.style.transform = Z.on ? 'translate('+Z.tx+'px,'+Z.ty+'px) scale('+z+')' : '';
+    $('zoomCtl').classList.toggle('on', Z.on);
+  }
+  function toggleZoomAt(cx, cy){
+    if(Z.on){ Z.on = false; }
+    else { Z.on = true; Z.tx = cx - cx*Z.level; Z.ty = cy - cy*Z.level; task.zoomOn++; }
+    applyZoom(); log({type:'zoom', on:Z.on, lvl:Z.level});
+  }
+  // Жесты как в iOS: двойное касание тремя пальцами — вкл/выкл;
+  // перемещение тремя пальцами — сдвиг увеличенного экрана.
+  var g3 = null, lastTap3 = 0;
+  function centroid(ts){ var x=0, y=0; for(var i=0; i<ts.length; i++){ x += ts[i].clientX; y += ts[i].clientY; } return {x:x/ts.length, y:y/ts.length}; }
+  screenEl.addEventListener('touchstart', function(e){
+    if(e.touches.length > 1) e.preventDefault();   // щипок страницы не нужен
+    if(!running || session.profile.zoom !== 'gesture') return;
+    if(e.touches.length === 3){ var c = centroid(e.touches); g3 = {t:performance.now(), c:c, last:c, moved:false}; }
+  }, {passive:false});
+  screenEl.addEventListener('touchmove', function(e){
+    if(e.touches.length > 1) e.preventDefault();
+    if(!g3 || e.touches.length !== 3) return;
+    var c = centroid(e.touches);
+    if(!g3.moved && Math.hypot(c.x-g3.c.x, c.y-g3.c.y) > 12){ g3.moved = true; if(Z.on){ task.zoomPan++; log({type:'pan'}); } }
+    if(g3.moved && Z.on){ Z.tx += c.x-g3.last.x; Z.ty += c.y-g3.last.y; applyZoom(); }
+    g3.last = c;
+  }, {passive:false});
+  screenEl.addEventListener('touchend', function(e){
+    if(!g3 || e.touches.length !== 0) return;
+    var now = performance.now();
+    if(!g3.moved && now - g3.t < 350){
+      if(now - lastTap3 < 450){ var r = zoomWrap.getBoundingClientRect(); toggleZoomAt(g3.c.x-r.left, g3.c.y-r.top); lastTap3 = 0; }
+      else lastTap3 = now;
+    }
+    g3 = null;
+  });
+  document.addEventListener('gesturestart', function(e){ e.preventDefault(); });
+
+  // Кнопка-пульт: касание — вкл/выкл; перетаскивание пульта при включённом
+  // зуме ведёт увеличенный участок, как пульт зума в iOS.
+  (function(){
+    var ctl = $('zoomCtl'), st = null;
+    ctl.addEventListener('pointerdown', function(e){
+      if(!running) return;
+      ctl.setPointerCapture(e.pointerId); st = {x:e.clientX, y:e.clientY, lx:e.clientX, ly:e.clientY, moved:false};
+    });
+    ctl.addEventListener('pointermove', function(e){
+      if(!st) return;
+      if(!st.moved && Math.hypot(e.clientX-st.x, e.clientY-st.y) > 8){ st.moved = true; if(Z.on){ task.zoomPan++; log({type:'pan'}); } }
+      if(st.moved && Z.on){ Z.tx -= (e.clientX-st.lx)*1.5; Z.ty -= (e.clientY-st.ly)*1.5; applyZoom(); }
+      st.lx = e.clientX; st.ly = e.clientY;
+    });
+    ctl.addEventListener('pointerup', function(){
+      if(st && !st.moved && running) toggleZoomAt(zoomWrap.clientWidth/2, zoomWrap.clientHeight/2);
+      st = null;
+    });
+    ctl.addEventListener('pointercancel', function(){ st = null; });
+  })();
+
+  // ---------- Озвучивание ----------
+  // Голос — системный голос браузера по умолчанию, не тот, что настроен
+  // у пациента. Читает текст текущего экрана (без клавиатуры).
+  function speak(text){
+    if(!('speechSynthesis' in window)) return;
+    speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(text); u.lang = 'ru-RU'; u.rate = 0.95;
+    speechSynthesis.speak(u);
+  }
+  $('speakCtl').addEventListener('click', function(){
+    if(!running) return;
+    task.speakUses++; log({type:'speak'});
+    speak($('view').innerText.replace(/\s+/g, ' ').slice(0, 400));
+  });
+
+  // ---------- Скрытое управление ----------
+  // Долгое нажатие (1,5 с): на время в углу — меню специалиста;
+  // на кнопку «Для специалиста» — сводка. Клавишами — Enter.
+  function longPress(el, fn){
+    var tm = null;
+    el.addEventListener('pointerdown', function(){ tm = setTimeout(function(){ tm = null; fn(); }, 1500); });
+    ['pointerup','pointercancel','pointerleave'].forEach(function(n){ el.addEventListener(n, function(){ if(tm){ clearTimeout(tm); tm = null; } }); });
+    el.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+    el.addEventListener('keydown', function(e){ if(e.key === 'Enter') fn(); });
+  }
+  longPress($('corner'), function(){ if(running){ pause('меню'); $('hmenu').hidden = false; } });
+  longPress($('doneHold'), openSummary);
+
+  // ---------- Сводка ----------
+  function modeName(m){ return m === 'train' ? 'тренировочный' : 'измерительный'; }
+  function openSummary(){
+    var t = task, p = t.profile;
+    $('sumHead').textContent = t.code+' · вариант '+t.variant+' · '+modeName(t.mode)+' · набор «'+p.name+'»';
+    var rows = [
+      ['Исход', t.outcome],
+      ['Время, с', comma(t.time_s)],
+      ['Касаний всего', t.taps],
+      ['Промахов', t.miss],
+      ['Не тот элемент', t.wrong],
+      ['Лишних возвратов', t.back],
+      ['Неверных символов', t.chars],
+      ['Доля попаданий', t.hitShare === null ? '—' : Math.round(t.hitShare*100)+'%'],
+      ['Среднее отклонение от центра (клавиши, значки, кнопки), мм', t.dmean === null ? '—' : comma(t.dmean)],
+      ['Зум: включений / сдвигов', t.zoomOn+' / '+t.zoomPan],
+      ['Озвучиваний', t.speakUses],
+      ['Набрано диктовкой', t.dictated ? 'да' : 'нет'],
+      ['Отправленный текст', t.text || '—']
+    ];
+    $('sumTable').innerHTML = rows.map(function(r){ return '<tr><th scope="row">'+r[0]+'</th><td>'+esc(r[1])+'</td></tr>'; }).join('');
+    show('summary');
+  }
+
+  // ---------- Выгрузка ----------
+  function codesSummary(){
+    var m = {};
+    store.tasks.forEach(function(t){
+      m[t.code] = m[t.code] || {all:0, fresh:0};
+      m[t.code].all++; if(!t.exported) m[t.code].fresh++;
+    });
+    return m;
+  }
+  function renderCodes(){
+    var m = codesSummary(), ul = $('codes'), keys = Object.keys(m);
+    ul.innerHTML = keys.length ? '' : '<li>Пока нет.</li>';
+    keys.forEach(function(k){
+      var li = document.createElement('li');
+      li.innerHTML = '<b>'+esc(k)+'</b> — заданий: '+m[k].all+(m[k].fresh ? ', <span class="warn">не выгружено: '+m[k].fresh+'</span>' : ', всё выгружено')+
+        '<div class="row2" style="margin-top:6px;"><button data-share="'+esc(k)+'">Поделиться</button><button data-dl="'+esc(k)+'">Скачать</button></div>';
+      ul.appendChild(li);
+    });
+    ul.querySelectorAll('[data-share]').forEach(function(b){ b.onclick = function(){ exportCode(b.getAttribute('data-share'), true); }; });
+    ul.querySelectorAll('[data-dl]').forEach(function(b){ b.onclick = function(){ exportCode(b.getAttribute('data-dl'), false); }; });
+  }
+  // В файл идут ВСЕ задания пациента, уже выгруженные тоже: скрипт на Маке
+  // пропускает строки, которые уже есть в таблице, так что повтор безопасен.
+  function exportCode(code, viaShare){
+    var list = store.tasks.filter(function(t){ return t.code === code; });
+    var clean = list.map(function(t){ var c = Object.assign({}, t); delete c.exported; return c; });
+    var body = JSON.stringify({tool:'catis_trainer', schema:1, version:VERSION, exported:new Date().toISOString(), code:code, tasks:clean}, null, 1);
+    // Имя как у инвентаря: CATIS_P-07_… — латинская P, чтобы правило .gitignore
+    // CATIS_P-* закрывало и эти файлы.
+    var name = 'CATIS_P-'+code.replace(/^[PП]-/i, '')+'_trainer_'+new Date().toISOString().slice(0, 10)+'.json';
+    var st = $('exportStatus');
+    function mark(){ list.forEach(function(t){ t.exported = true; }); saveStore(); renderCodes(); }
+    if(viaShare){
+      var file;
+      try{ file = new File([body], name, {type:'application/json'}); }catch(e){ st.textContent = 'Файл не создаётся — используйте «Скачать».'; return; }
+      if(!navigator.share || (navigator.canShare && !navigator.canShare({files:[file]}))){
+        st.textContent = 'Меню «Поделиться» файлами недоступно — используйте «Скачать».'; return;
+      }
+      navigator.share({files:[file], title:name}).then(function(){ mark(); st.textContent = 'Отправлено: '+name; },
+        function(e){ st.textContent = e.name === 'AbortError' ? 'Отправку отменили.' : 'Ошибка: '+e.name; });
+    } else {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([body], {type:'application/json'})); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+      mark(); st.textContent = 'Скачивание запущено: '+name;
+    }
+  }
+  function clearExported(){
+    var n = store.tasks.filter(function(t){ return t.exported; }).length;
+    if(!n){ $('exportStatus').textContent = 'Выгруженных результатов нет.'; return; }
+    if(!confirm('Стереть с телефона '+n+' выгруженных заданий? Невыгруженные останутся. Проверьте, что файлы дошли до Мака.')) return;
+    store.tasks = store.tasks.filter(function(t){ return !t.exported; }); saveStore(); renderCodes();
+    $('exportStatus').textContent = 'Стёрто: '+n+'.';
+  }
+
+  // ---------- Меню ----------
+  function toSetup(){
+    $('calibLine').textContent = 'Калибровка: '+comma(pxPerMm.toFixed(2))+' px/мм'+(calibDevice ? ' · '+calibDevice : '')+(calibSource ? ' · из '+calibSource : '');
+    renderVariantSel(); renderCodes();
+    show('setup');
+  }
+
+  $('version').textContent = 'CATIS-тренажёр · версия '+VERSION;
+  loadStore(); renderProfiles('factory');
+  if(loadCalib()){ toSetup(); }
+  else { $('calibNote').textContent = 'Сохранённой калибровки нет: выберите устройство или подберите по линейке.'; renderBar(); show('calib'); }
+</script>
+</body>
+</html>
